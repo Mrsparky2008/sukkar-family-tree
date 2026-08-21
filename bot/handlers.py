@@ -24,7 +24,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 import config
 import submissions
-from bot import flows, store, texts, understand
+from bot import dictation, flows, store, texts, understand
 
 log = logging.getLogger(__name__)
 
@@ -474,6 +474,18 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         state["index"] += 1
         return await _ask(update, context)
 
+    # Somebody who already knows will type the whole family in one go. The
+    # question asked for one name, but refusing the answer loses the person
+    # worth listening to most.
+    if step.type in (flows.NAME, flows.TEXT) and dictation.looks_like_dictation(typed):
+        reading = dictation.parse(
+            typed,
+            default_role=flows.default_role(_state(context)["kind"], step.id),
+            subject_name=_subject_name_or_none(context),
+        )
+        if reading:
+            return await _absorb_dictation(update, context, reading)
+
     try:
         value = flows.clean(step, typed)
     except flows.FlowError as problem:
@@ -720,6 +732,104 @@ async def on_source_given(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _say(update, str(problem))
         return ASK_SOURCE
     return await _send(update, context, payload)
+
+
+# ===========================================================================
+# A whole family in one message
+# ===========================================================================
+
+
+def _subject_name_or_none(context: ContextTypes.DEFAULT_TYPE) -> str | None:
+    cursor = _cursor(context)
+    return cursor["label"] if cursor else None
+
+
+async def _absorb_dictation(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, reading: dictation.Reading
+):
+    """Turn a dictated family into basket entries, then show them for checking.
+
+    One entry per person, so each can be corrected or dropped on its own — and
+    so a spouse can hang off the specific relative they married rather than
+    off the group.
+    """
+    user_id = update.effective_user.id
+    who = await store.contributor_state(user_id)
+    about = await _subject_of(update, context)
+    submitted_by = submissions.submitter(
+        user_id, person_id=who["person_id"], label=who["label"]
+    )
+    note = "; ".join(reading.notes) or None
+
+    _reset(context)
+    drafts_by_label: dict[str, str] = {}
+    parents = [
+        m for m in reading.people
+        if m.role in (submissions.FATHER, submissions.MOTHER)
+    ]
+    others = [m for m in reading.people if m not in parents]
+
+    def entry_of(mention: dictation.Mention):
+        return submissions.person(
+            mention.role,
+            mention.given_name,
+            sex=mention.sex,
+            family_name=mention.family_name,
+            notes=mention.note,
+        )
+
+    def stash(payload) -> str:
+        draft_id = _draft_id(context)
+        payload["_draft_id"] = draft_id
+        _basket(context).append(payload)
+        return draft_id
+
+    try:
+        if parents:
+            stash(
+                submissions.build(
+                    submissions.ADD_PARENTS,
+                    submitted_by=submitted_by,
+                    about=dict(about),
+                    people=[entry_of(m) for m in parents],
+                    note=note,
+                )
+            )
+
+        for mention in others:
+            if mention.role == submissions.SPOUSE and mention.spouse_of:
+                # Their husband hangs off them, not off whoever we started from.
+                anchor = drafts_by_label.get(mention.spouse_of)
+                if anchor is None:
+                    continue
+                subject = submissions.subject(label=mention.spouse_of)
+                subject["draft_id"] = anchor
+            else:
+                subject = dict(about)
+
+            kind = {
+                submissions.SIBLING: submissions.ADD_SIBLING,
+                submissions.CHILD: submissions.ADD_CHILD,
+                submissions.SPOUSE: submissions.ADD_SPOUSE,
+            }[mention.role]
+            draft_id = stash(
+                submissions.build(
+                    kind,
+                    submitted_by=submitted_by,
+                    about=subject,
+                    people=[entry_of(mention)],
+                    note=note,
+                )
+            )
+            drafts_by_label[mention.label()] = draft_id
+    except ValueError as problem:
+        log.warning("dictation rejected for %s: %s", user_id, problem)
+        return await _show_menu(update, context, texts.ERROR)
+
+    lead = texts.DICTATED.format(count=len(reading))
+    if any(m.uncertain for m in reading.people):
+        lead += texts.DICTATED_UNSURE
+    return await _show_review(update, context, lead)
 
 
 # ===========================================================================

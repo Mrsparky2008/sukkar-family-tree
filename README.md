@@ -266,6 +266,20 @@ Tapping a line retypes or removes it. Nothing reaches the queue until they
 send, and removing a parent removes anything that hung off them, so no
 grandfather is left anchored to nothing.
 
+## A whole family in one message
+
+The relatives who hold four generations in their heads do not want twenty
+questions. They type the lot:
+
+```
+Kalim's parents are Toufic and Cilene
+Kalim's sisters: Dibeh, Sonia and Saide, married to Jamil Tarabay
+```
+
+That reads into six people with the right relationships — including the
+husband hanging off the sister he married, not off Kalim — and comes back as
+an editable list. See `bot/README.md`.
+
 ## Adding relatives for anyone, not just yourself
 
 A contributor can only enter about six people if every question is about

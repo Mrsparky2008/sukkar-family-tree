@@ -205,6 +205,25 @@ CONFIRM_SUBMISSION = "Here's what I'll send:"
 
 ADDED = "Got it — {summary}."
 
+# --- a whole family in one message ----------------------------------------
+
+DICTATED = (
+    "That's {count} people — thank you, that's the fastest way to do this.\n\n"
+    "Here's what I understood. Tap anything that's wrong."
+)
+
+DICTATED_UNSURE = (
+    "\n\nI had to guess in a place or two — which of a pair of parents is "
+    "the father, and whether a husband or a wife was meant. Worth a look."
+)
+
+DICTATED_NOTHING = (
+    "I couldn't pick any names out of that, sorry.\n\n"
+    "Try it like this:\n"
+    "    his parents are Toufic and Cilene\n"
+    "    his sisters are Dibeh, Sonia and Saide"
+)
+
 REVIEW_SEND = "Review and send ({count})"
 
 REVIEW_HEADING = (

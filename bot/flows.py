@@ -371,6 +371,22 @@ MENU: list[tuple[str, Flow]] = [
     ("child", ADD_CHILD),
 ]
 
+#: When somebody dictates a list under a question, the question itself says
+#: what they are talking about — "his father's name?" answered with three
+#: names means three parents, not three strangers.
+_DEFAULT_ROLES = {
+    (submissions.ADD_PARENTS, "father_given"): submissions.FATHER,
+    (submissions.ADD_PARENTS, "mother_given"): submissions.MOTHER,
+    (submissions.ADD_SIBLING, "given"): submissions.SIBLING,
+    (submissions.ADD_SPOUSE, "given"): submissions.SPOUSE,
+    (submissions.ADD_CHILD, "given"): submissions.CHILD,
+}
+
+
+def default_role(kind: str, step_id: str) -> str | None:
+    return _DEFAULT_ROLES.get((kind, step_id))
+
+
 BY_KIND: dict[str, Flow] = {
     flow.kind: flow
     for flow in (IDENTIFY, ADD_PARENTS, ADD_SIBLING, ADD_SPOUSE, ADD_CHILD, CORRECTION)

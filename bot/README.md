@@ -17,6 +17,7 @@ renew. It runs anywhere Python runs.
 | `flows.py` | The conversations, as data: a list of questions and a function turning answers into a payload. No Telegram, no database — testable on its own. |
 | `handlers.py` | One generic ask → confirm → advance loop over those flows. |
 | `understand.py` | Reading what people actually type when the bot asked with buttons. |
+| `dictation.py` | Reading a whole family out of one message. |
 | `store.py` | The only file that touches the database. |
 | `main.py` | Wiring and entry point. |
 
@@ -47,6 +48,37 @@ it is where they put the phone down.
 It never guesses at a name — only at answers the bot already offered, and only
 when one option is clearly ahead. Genuine ambiguity re-asks, showing the
 question *with* its buttons rather than scolding and leaving nothing to tap.
+
+## A whole family in one message
+
+One question at a time suits someone who needs coaxing. It is exactly wrong
+for the person who already knows — the aunt who can name four generations and
+wants to get it out in one go. Told "that's longer than a first name", she
+stops, and she was the one worth listening to.
+
+So a message like
+
+```
+Kalim's parents are Toufic and Cilene
+Kalim's sisters: Dibeh, Sonia and Saide, married to Jamil Tarabay
+                                          — the other girls are single
+```
+
+is read into six people, with Jamil hanging off Saide rather than off Kalim,
+and shown back as an editable list before anything is sent.
+
+The parsing is deliberately literal: relationship words set the role, and a
+role gives the sex. It never invents a name it cannot see. Two things it does
+have to guess — which of an unlabelled pair of parents is the father, and a
+spouse's sex from their partner's — are said out loud in the reply.
+
+A remark that fits nobody in particular ("the other girls are single") is
+kept verbatim on the submission rather than pinned to whoever happened to be
+on the same line. Attributing "the others" by rule gets it wrong, and nobody
+notices.
+
+Ordinary single answers still go down the ordinary path. Only a message that
+names a relationship, or clearly lists several people, gets parsed.
 
 ## Constraint 4
 
