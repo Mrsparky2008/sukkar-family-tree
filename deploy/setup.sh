@@ -21,8 +21,18 @@ apt-get update -y
 apt-get install -y python3 python3-venv python3-pip git awscli sqlite3
 
 # --- the code --------------------------------------------------------------
+#
+# Preferred source is a tarball in the backup bucket, uploaded at deploy time:
+# it works whether or not the git repository is public, and it means the exact
+# bytes that were tested are the exact bytes that run. Git remains a fallback.
 
-if [ -d "$APP/.git" ]; then
+export AWS_ACCESS_KEY_ID="$BACKUP_KEY" AWS_SECRET_ACCESS_KEY="$BACKUP_SECRET" AWS_DEFAULT_REGION="$REGION"
+
+mkdir -p "$APP"
+if aws s3 cp "s3://$BUCKET/code/family-tree.tar.gz" /tmp/code.tar.gz --only-show-errors; then
+  tar -xzf /tmp/code.tar.gz -C "$APP"
+  rm -f /tmp/code.tar.gz
+elif [ -d "$APP/.git" ]; then
   git -C "$APP" fetch origin "$BRANCH"
   git -C "$APP" reset --hard "origin/$BRANCH"
 else
@@ -204,12 +214,16 @@ chmod +x /usr/local/bin/tree-chart
 
 cat > /usr/local/bin/tree-update <<'UPDATE'
 #!/bin/bash
-# Pull new code and restart. The database is elsewhere and is not touched.
+# Fetch the latest code bundle and restart. The database is elsewhere and is
+# not touched.
 set -euo pipefail
-git -C /opt/family-tree pull --ff-only
+source /opt/family-tree/.env
+aws s3 cp "s3://$BACKUP_BUCKET/code/family-tree.tar.gz" /tmp/code.tar.gz --only-show-errors
+tar -xzf /tmp/code.tar.gz -C /opt/family-tree
+rm -f /tmp/code.tar.gz
 /opt/family-tree/.venv/bin/pip install -q -r /opt/family-tree/requirements.txt
-systemctl restart family-tree
-systemctl --no-pager status family-tree | head -5
+systemctl restart family-tree family-tree-admin
+systemctl --no-pager status family-tree | head -3
 UPDATE
 chmod +x /usr/local/bin/tree-update
 
