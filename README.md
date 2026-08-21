@@ -7,8 +7,9 @@ public read-only web page.
 Built white-label: everything family-specific lives in `config.py`, so another
 family can fork this repo, edit that one file, and deploy.
 
-> **Status: Step 1 of 4 (Foundation) — complete.**
-> Steps 2–4 (Telegram bot, admin queue, public view) are not built yet.
+> **Status: Steps 1–2 of 4 complete.**
+> Foundation and Telegram capture are built. The admin review queue (step 3)
+> and the public view (step 4) are not.
 
 ---
 
@@ -52,6 +53,14 @@ python seed.py --check    # report on what is in it
 python -m unittest discover -s tests -t .
 ```
 
+To run the bot as well:
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env      # then put your @BotFather token in it
+python -m bot
+```
+
 `seed.py` prints every person grouped by branch, then flags anything that needs
 a human: broken references, ancestry cycles, and display-name collisions.
 
@@ -93,7 +102,10 @@ db.py           All SQLite access, the display-name rule, fuzzy matching,
 seed.py         Hand-editable starting data, plus validate / load / report.
 tests/          python -m unittest discover -s tests -t .
 
-bot/            Step 2 — Telegram capture.       Not built.
+submissions.py  The payload contract: what a submission looks like, and how
+                to describe one. Shared by the bot and the admin interface.
+
+bot/            Step 2 — Telegram capture. See bot/README.md.
 admin/          Step 3 — Flask review queue.     Not built.
 web/            Step 4 — Public Cytoscape view.  Not built.
 ```
@@ -135,6 +147,22 @@ instance — is left unassigned rather than guessed at.
 - `db.check_integrity()` — foreign key violations, ancestry cycles, name
   collisions, branches with no founder, people with no branch.
 - 72 tests over all of it, including the `display_name` doctests.
+
+## What Step 2 gives you
+
+- The whole bot: identification on first contact, then the six-option menu.
+- One question per message, every typed answer read back for confirmation, and
+  "no" re-asks rather than starting over.
+- A first name with a space in it is refused with an explanation, because
+  "Khalil Youssef Sukkar" typed into a first-name box is how the computed-name
+  rule silently produces nonsense.
+- Corrections go into the queue as suggestions. Nothing edits live data, and
+  the original submission is left exactly as it was sent.
+- Duplicate flagging on every submission, for the admin to judge.
+- 47 more tests, driving real conversations against a temporary database.
+  A test fails the build if anything under `bot/` calls a privileged write.
+
+Details in `bot/README.md`.
 
 ---
 

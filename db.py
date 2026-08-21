@@ -575,6 +575,23 @@ def list_submissions(
     return conn.execute(sql, params).fetchall()
 
 
+def list_submissions_by_user(
+    conn: sqlite3.Connection, telegram_user_id: int, limit: int = 10
+) -> list[sqlite3.Row]:
+    """A contributor's own submissions, newest first.
+
+    Feeds the bot's "fix something I submitted" flow, which is why it returns
+    every status: a relative may well want to correct something already
+    approved, and that correction goes back through the queue like anything
+    else.
+    """
+    return conn.execute(
+        "SELECT * FROM submissions WHERE telegram_user_id = ?"
+        " ORDER BY id DESC LIMIT ?",
+        (telegram_user_id, limit),
+    ).fetchall()
+
+
 def submission_payload(row: sqlite3.Row) -> dict[str, Any]:
     return json.loads(row["payload_json"])
 

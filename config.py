@@ -19,6 +19,29 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 
+def _load_env_file(path: Path) -> None:
+    """Read a .env file into the environment, if one is there.
+
+    Deliberately not python-dotenv: this is a dozen lines, it has no
+    dependency to keep working in five years, and real environment variables
+    always win so a deployment can override the file without editing it.
+    """
+    if not path.is_file():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
+_load_env_file(BASE_DIR / ".env")
+
+
 # ---------------------------------------------------------------------------
 # Identity
 # ---------------------------------------------------------------------------
@@ -142,6 +165,10 @@ def _env_id_list(name: str) -> list[int]:
 #: Step 2. From @BotFather.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
+#: The bot's @username, used in the "share this with a relative" message that
+#: gets forwarded around WhatsApp. Without the @.
+TELEGRAM_BOT_USERNAME = "Sukar_bot"
+
 #: Telegram users with cross-branch review powers. These are trusted from
 #: config rather than the database so a locked-out super admin can always be
 #: restored by editing the environment.
@@ -166,3 +193,13 @@ FUZZY_MATCH_THRESHOLD = 0.82
 
 #: Submissions shown per page in the admin queue.
 QUEUE_PAGE_SIZE = 25
+
+#: Where the public read-only view is published. The bot's "View the tree"
+#: option sends this link. Leave empty until step 4 is deployed; the bot then
+#: says the tree is not published yet instead of sending a dead link.
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
+
+#: How many of a contributor's own past submissions the "Fix something I
+#: submitted" flow offers. Telegram inline keyboards get unusable past about
+#: this many rows.
+FIXABLE_SUBMISSION_LIMIT = 10
