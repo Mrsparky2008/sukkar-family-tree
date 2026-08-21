@@ -85,6 +85,7 @@ def _create(
         entry["given_name"],
         from_submission_id=submission_id,
         given_name_ar=entry.get("given_name_ar"),
+        also_known_as=entry.get("also_known_as"),
         family_name=entry.get("family_name"),
         sex=entry.get("sex"),
         notes=entry.get("notes"),
@@ -414,6 +415,38 @@ def show_spellings(conn: sqlite3.Connection) -> None:
         )
 
 
+def find_people(conn: sqlite3.Connection, needle: str) -> None:
+    """Look somebody up by any name they answer to, and get their number."""
+    target = needle.strip().casefold()
+    hits = []
+    for row in db.get_people(conn):
+        haystack = " ".join(
+            part.casefold()
+            for part in (
+                row["given_name"], row["family_name"], row["also_known_as"],
+                row["given_name_ar"], db.row_display_name(row),
+            )
+            if part
+        )
+        if target in haystack:
+            hits.append(row)
+
+    if not hits:
+        print(f"\nNobody matching {needle!r}.\n")
+        return
+
+    print(f"\n{len(hits)} match(es) for {needle!r}\n")
+    for row in hits:
+        parents = db.get_parents(conn, row["id"])
+        line = f"  #{row['id']:<4} {db.display_name_with_also_known_as(row)}"
+        if parents:
+            line += "   child of " + " & ".join(
+                db.row_display_name(p) for p in parents
+            )
+        print(line)
+    print()
+
+
 def show_person(conn: sqlite3.Connection, person_id: int) -> None:
     """Drill down: who this person is, and who says so."""
     person = db.get_person(conn, person_id)
@@ -523,6 +556,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tree", action="store_true")
     parser.add_argument("--who", type=int, metavar="PERSON_ID",
                         help="drill down: who they are and who says so")
+    parser.add_argument("--find", metavar="NAME",
+                        help="look somebody up and get their number")
     parser.add_argument("--export", metavar="FILE",
                         help="write everything out as plain JSON")
     parser.add_argument("--spellings", action="store_true",
@@ -536,7 +571,9 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db(conn)
 
     try:
-        if args.export:
+        if args.find:
+            find_people(conn, args.find)
+        elif args.export:
             count = export_everything(conn, args.export)
             print(f"wrote {count} rows to {args.export}")
         elif args.who is not None:

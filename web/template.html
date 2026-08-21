@@ -237,6 +237,14 @@ aside h2 {
 
 .arabic { font-family: "IBM Plex Sans Arabic", var(--body); direction: rtl; }
 
+.idtag {
+  font-family: var(--mono);
+  font-size: 0.7em;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
 .close {
   position: absolute;
   inset-block-start: calc(var(--step) * 1.5);
@@ -312,7 +320,7 @@ footer {
   <span class="place">__PLACE__</span>
   <span class="tally" id="tally"></span>
   <div class="controls">
-    <input type="search" id="search" placeholder="Find a name" autocomplete="off" spellcheck="false">
+    <input type="search" id="search" placeholder="Find a name or number" autocomplete="off" spellcheck="false">
     <div id="branches" style="display:flex;gap:var(--step);flex-wrap:wrap"></div>
   </div>
 </header>
@@ -521,6 +529,7 @@ function visible(person) {
 
 function matches(person) {
   if (!query) return false;
+  if (query === String(person.id)) return true;
   return person.search.includes(query);
 }
 
@@ -614,6 +623,14 @@ function draw() {
     ctx.fillStyle = person.sex === "M" ? css("--male")
                   : person.sex === "F" ? css("--female") : css("--unknown");
     ctx.fillRect(x - NODE_W / 2, y - NODE_H / 2, 3, NODE_H);
+
+    // The number is the only thing that is unique. Two men called Toufic
+    // Sukar in one conversation is not a hypothetical here.
+    ctx.fillStyle = muted;
+    ctx.font = "400 9px " + css("--mono");
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillText(person.id, x + NODE_W / 2 - 4, y - NODE_H / 2 + 3);
 
     ctx.fillStyle = query && !hit ? muted : ink;
     ctx.font = "500 12px " + css("--body");
@@ -723,7 +740,8 @@ const panelBody = document.getElementById("panelBody");
 function nameButton(id) {
   const person = PEOPLE.get(id);
   if (!person) return "";
-  return '<button class="link" data-go="' + id + '">' + escape(person.display) + "</button>";
+  return '<button class="link" data-go="' + id + '">' + escape(person.display)
+    + '</button> <span class="idtag">#' + id + "</span>";
 }
 
 function escape(text) {
@@ -743,7 +761,8 @@ function show(id) {
   selected = id;
 
   const branch = BRANCHES.get(person.branch);
-  let html = "<h2>" + escape(person.display) + "</h2>";
+  let html = '<h2>' + escape(person.display)
+    + ' <span class="idtag">#' + person.id + "</span></h2>";
   if (person.arabic) html += '<p class="arabic">' + escape(person.arabic) + "</p>";
   html += '<p class="branchline">';
   html += branch ? escape(branch.name) : "No branch recorded";

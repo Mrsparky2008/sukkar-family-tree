@@ -633,6 +633,53 @@ class AnchorTests(ReviewTestCase):
         self.assertNotIn("Taouk", spellings)
 
 
+class IdentityTests(ReviewTestCase):
+    """Two men called Toufic in one conversation is not a hypothetical."""
+
+    def test_the_english_name_survives_approval(self):
+        """It was being dropped at the moment of approval, silently."""
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Hanna", sex="M", also_known_as="John")],
+            S.subject(person_id=self.ids["khalil_y"], label="Khalil"),
+        )
+        created = review.approve(self.conn, sid, reviewed_by=1, force=True)
+        row = db.get_person(self.conn, created[0])
+        self.assertEqual(row["also_known_as"], "John")
+        self.assertIn("(John)", db.display_name_with_also_known_as(row))
+
+    def test_the_number_is_unique_and_never_reused(self):
+        first = db.create_person(self.conn, "Toufic", sex="M")
+        second = db.create_person(self.conn, "Toufic", sex="M")
+        self.assertNotEqual(first, second)
+
+    def test_the_fathers_name_separates_two_men_who_share_a_given_name(self):
+        """Steven's brother Toufic and his grandfather Toufic."""
+        grandfather = db.create_person(self.conn, "Toufic", sex="M")
+        father = db.create_person(self.conn, "Kalim", sex="M", father_id=grandfather)
+        brother = db.create_person(self.conn, "Toufic", sex="M", father_id=father)
+
+        self.assertEqual(
+            db.row_display_name(db.get_person(self.conn, grandfather)),
+            "Toufic Sukkar",
+        )
+        self.assertEqual(
+            db.row_display_name(db.get_person(self.conn, brother)),
+            "Toufic Kalim Sukkar",
+        )
+
+    def test_a_genuine_collision_is_surfaced_not_hidden(self):
+        """Two Joseph Kalim Sukkars. The number is the only thing left."""
+        father = db.create_person(self.conn, "Kalim", sex="M")
+        a = db.create_person(self.conn, "Joseph", sex="M", father_id=father)
+        b = db.create_person(self.conn, "Joseph", sex="M", father_id=father)
+
+        collisions = db.find_name_collisions(self.conn)
+        names = [name for name, _rows in collisions]
+        self.assertIn("Joseph Kalim Sukkar", names)
+        self.assertNotEqual(a, b)
+
+
 class ClosenessTests(ReviewTestCase):
     def test_a_person_is_no_distance_from_themselves(self):
         self.assertEqual(
