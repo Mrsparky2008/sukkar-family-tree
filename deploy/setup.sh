@@ -16,7 +16,12 @@ ADMIN_PASSWORD="${admin_password}"
 BACKUP_KEY="${backup_key}"
 BACKUP_SECRET="${backup_secret}"
 
-export AWS_ACCESS_KEY_ID="$BACKUP_KEY" AWS_SECRET_ACCESS_KEY="$BACKUP_SECRET" AWS_DEFAULT_REGION="$REGION"
+# On EC2 the instance role supplies AWS credentials by itself; exported keys
+# would override it, so only export when explicitly given (the no-role path).
+if [ -n "$BACKUP_KEY" ]; then
+  export AWS_ACCESS_KEY_ID="$BACKUP_KEY" AWS_SECRET_ACCESS_KEY="$BACKUP_SECRET"
+fi
+export AWS_DEFAULT_REGION="$REGION"
 
 # Whatever happens — success or death — the boot log lands in the bucket, so
 # a deployment with no SSH access can still be diagnosed.
@@ -93,12 +98,14 @@ SECRET_KEY=$(openssl rand -hex 32)
 
 FAMILY_TREE_DB=$DATA/family.db
 
-# So nightly backups can reach S3.
-AWS_ACCESS_KEY_ID=$BACKUP_KEY
-AWS_SECRET_ACCESS_KEY=$BACKUP_SECRET
 AWS_DEFAULT_REGION=$REGION
 BACKUP_BUCKET=$BUCKET
 ENV
+  # Only the no-role deployment needs stored keys; on EC2 the instance role
+  # signs S3 calls and empty key lines would break it.
+  if [ -n "$BACKUP_KEY" ]; then
+    printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\n' "$BACKUP_KEY" "$BACKUP_SECRET" >> "$APP/.env"
+  fi
   chmod 600 "$APP/.env"
 fi
 

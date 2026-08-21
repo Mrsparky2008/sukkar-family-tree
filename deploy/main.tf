@@ -40,15 +40,7 @@ variable "name" {
   default     = "family-tree"
 }
 
-variable "bundle" {
-  description = <<-TEXT
-    Lightsail size. nano_3_2 is 512 MB and about $5/month, which is ample:
-    the bot is idle between messages and the whole database is a few
-    megabytes. Move up only if you outgrow it, which you will not.
-  TEXT
-  type        = string
-  default     = "nano_3_2"
-}
+
 
 variable "repository" {
   description = "Git repository to deploy."
@@ -96,25 +88,106 @@ variable "admin_password" {
   sensitive = true
 }
 
-variable "ssh_key_name" {
-  description = <<-TEXT
-    Name of an existing Lightsail key pair to log in with. Leave empty and
-    Lightsail issues a default key you download from the console.
-  TEXT
-  type        = string
-  default     = ""
-}
+
 
 # ---------------------------------------------------------------------------
 # The machine
+#
+# Plain EC2, after Lightsail's launch scripts turned out never to execute in
+# this account at all (proven with a three-line probe). EC2 also does this
+# better: the instance gets an IAM role, so no AWS keys are ever stored on
+# the box, and Systems Manager gives shell access through the AWS API with
+# no SSH keys to manage.
 # ---------------------------------------------------------------------------
 
-resource "aws_lightsail_instance" "bot" {
-  name              = var.name
-  availability_zone = "${var.region}a"
-  blueprint_id      = "ubuntu_24_04"
-  bundle_id         = var.bundle
-  key_pair_name     = var.ssh_key_name != "" ? var.ssh_key_name : null
+variable "instance_type" {
+  description = "1 GB of memory is comfortable; the bot itself is tiny."
+  type        = string
+  default     = "t4g.micro"
+}
+
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"]
+  }
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_subnets" "default" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+}
+
+resource "aws_security_group" "bot" {
+  name        = "${var.name}-bot"
+  description = "Family tree bot: outbound only; shell access is via SSM"
+  vpc_id      = data.aws_vpc.default.id
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_iam_role" "bot" {
+  name = "${var.name}-bot"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "bot_s3" {
+  name = "backups-and-code"
+  role = aws_iam_role.bot.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.backups.arn}/*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.backups.arn}/code/*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "bot_ssm" {
+  role       = aws_iam_role.bot.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_instance_profile" "bot" {
+  name = "${var.name}-bot"
+  role = aws_iam_role.bot.name
+}
+
+resource "aws_instance" "bot" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  subnet_id              = data.aws_subnets.default.ids[0]
+  vpc_security_group_ids = [aws_security_group.bot.id]
+  iam_instance_profile   = aws_iam_instance_profile.bot.name
 
   user_data = templatefile("${path.module}/setup.sh", {
     repository     = var.repository
@@ -125,35 +198,41 @@ resource "aws_lightsail_instance" "bot" {
     admin_password = var.admin_password
     code_url       = var.code_url
     log_url        = var.log_url
-    backup_key     = aws_iam_access_key.backup.id
-    backup_secret  = aws_iam_access_key.backup.secret
+    backup_key     = ""
+    backup_secret  = ""
   })
 
-  tags = {
-    Project = var.name
+  root_block_device {
+    volume_size = 16
+    volume_type = "gp3"
   }
+
+  tags = { Name = var.name, Project = var.name }
 }
+
+resource "aws_eip" "bot" {
+  instance = aws_instance.bot.id
+  tags     = { Name = "${var.name}-ip" }
+}
+
+output "ip" {
+  value = aws_eip.bot.public_ip
+}
+
+output "shell" {
+  description = "Browser shell: AWS console -> EC2 -> the instance -> Connect -> Session Manager"
+  value       = "aws ssm start-session --target ${aws_instance.bot.id} --region ${var.region}"
+}
+
+
 
 # The bot only makes outbound connections to Telegram, so nothing needs to
 # reach it. SSH is the single exception, and only for the person deploying.
-resource "aws_lightsail_instance_public_ports" "bot" {
-  instance_name = aws_lightsail_instance.bot.name
 
-  port_info {
-    protocol  = "tcp"
-    from_port = 22
-    to_port   = 22
-  }
-}
 
-resource "aws_lightsail_static_ip" "bot" {
-  name = "${var.name}-ip"
-}
 
-resource "aws_lightsail_static_ip_attachment" "bot" {
-  static_ip_name = aws_lightsail_static_ip.bot.name
-  instance_name  = aws_lightsail_instance.bot.name
-}
+
+
 
 # ---------------------------------------------------------------------------
 # Backups
@@ -211,67 +290,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
 # An IAM user for the instance to write backups with. Lightsail instances
 # cannot take an IAM role, so this is the narrowest alternative: one key that
 # can put objects in one bucket and do nothing else at all.
-resource "aws_iam_user" "backup" {
-  name = "${var.name}-backup"
-}
 
-resource "aws_iam_user_policy" "backup" {
-  name = "${var.name}-backup"
-  user = aws_iam_user.backup.name
 
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect   = "Allow"
-        Action   = ["s3:PutObject"]
-        Resource = "${aws_s3_bucket.backups.arn}/*"
-      },
-      {
-        # The instance also fetches its own code from code/ — which makes the
-        # deployment independent of whether the git repository is reachable
-        # or even public.
-        Effect   = "Allow"
-        Action   = ["s3:GetObject"]
-        Resource = "${aws_s3_bucket.backups.arn}/code/*"
-      },
-    ]
-  })
-}
 
-resource "aws_iam_access_key" "backup" {
-  user = aws_iam_user.backup.name
-}
+
+
 
 # ---------------------------------------------------------------------------
 
-output "ip" {
-  description = "Log in with: ssh admin@<this address>"
-  value       = aws_lightsail_static_ip.bot.ip_address
-}
+
 
 output "backup_bucket" {
   value = aws_s3_bucket.backups.bucket
 }
 
-output "next_step" {
-  value = <<-TEXT
 
-    The machine is up. One thing left:
 
-      ssh admin@${aws_lightsail_static_ip.bot.ip_address}
-      sudo nano /opt/family-tree/.env      # paste the bot token
-      sudo systemctl restart family-tree
 
-    Then message the bot. See deploy/README.md for the rest.
-  TEXT
-}
-
-output "backup_credentials" {
-  description = "Written into .env by setup.sh; shown here only for reference."
-  sensitive   = true
-  value = {
-    AWS_ACCESS_KEY_ID     = aws_iam_access_key.backup.id
-    AWS_SECRET_ACCESS_KEY = aws_iam_access_key.backup.secret
-  }
-}
