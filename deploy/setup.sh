@@ -15,6 +15,8 @@ TOKEN="${telegram_token}"
 ADMIN_PASSWORD="${admin_password}"
 BACKUP_KEY="${backup_key}"
 BACKUP_SECRET="${backup_secret}"
+CODE_URL="${code_url}"
+LOG_URL="${log_url}"
 
 # On EC2 the instance role supplies AWS credentials by itself; exported keys
 # would override it, so only export when explicitly given (the no-role path).
@@ -25,10 +27,15 @@ export AWS_DEFAULT_REGION="$REGION"
 
 # Whatever happens — success or death — the boot log lands in the bucket, so
 # a deployment with no SSH access can still be diagnosed.
+# curl and a presigned URL, deliberately: diagnostics must work before
+# anything has been installed.
 report() {
-  aws s3 cp /var/log/cloud-init-output.log     "s3://$BUCKET/logs/boot-$(hostname)-$(date -u +%H%M%S).log"     --only-show-errors || true
+  if [ -n "$${LOG_URL:-}" ]; then
+    curl -sS -T /var/log/cloud-init-output.log "$LOG_URL" || true
+  fi
 }
 trap report EXIT
+report   # early marker: proves the script started at all
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -36,9 +43,12 @@ export DEBIAN_FRONTEND=noninteractive
 # that race must mean waiting, not dying.
 APT="apt-get -o DPkg::Lock::Timeout=600 -y"
 for attempt in 1 2 3; do
-  $APT update && $APT install python3 python3-venv python3-pip git awscli sqlite3 && break
+  $APT update && $APT install python3 python3-venv python3-pip git sqlite3 && break
   sleep 20
 done
+# For the nightly backups only — must not be able to kill the boot. Ubuntu
+# 24.04 dropped the awscli apt package; snap is the supported route.
+snap install aws-cli --classic || $APT install awscli || true
 
 # 512 MB of RAM is ample to run this and not quite ample to pip-install it.
 if [ ! -f /swapfile ]; then
@@ -53,7 +63,7 @@ fi
 # bytes that were tested are the exact bytes that run. Git remains a fallback.
 
 mkdir -p "$APP"
-if [ -n "$CODE_URL" ] && curl -fsSL "$CODE_URL" -o /tmp/code.tar.gz; then
+if [ -n "$${CODE_URL:-}" ] && curl -fsSL "$CODE_URL" -o /tmp/code.tar.gz; then
   tar -xzf /tmp/code.tar.gz -C "$APP"
   rm -f /tmp/code.tar.gz
 elif aws s3 cp "s3://$BUCKET/code/family-tree.tar.gz" /tmp/code.tar.gz --only-show-errors; then
