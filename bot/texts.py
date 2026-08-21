@@ -219,7 +219,7 @@ DICTATED = (
 
 #: Only ever list what was actually guessed. Warning about a guess the bot
 #: did not make teaches people to ignore the warnings.
-DICTATED_UNSURE = "\n\nTwo things I guessed at: {reasons}. Worth a look."
+DICTATED_UNSURE = "\n\nI guessed at: {reasons}. Worth a look."
 DICTATED_UNSURE_ONE = "\n\nOne thing I guessed at: {reasons}. Worth a look."
 
 DICTATED_SUBJECT = "These are {name}'s relatives, so that's who I've put them under."

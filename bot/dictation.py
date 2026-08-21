@@ -396,9 +396,16 @@ def _names_in(
                     family=_titled(" ".join(words[1:])) if len(words) > 1 else None,
                     also_known_as=others[0] if others else None,
                     remarks=remarks,
-                    # In a plural list where the others are single names, two
-                    # words is as likely to be a missing comma as a surname.
-                    maybe_two=plural and len(words) == 2,
+                    # "Lena Centia" in a list of single names could be one
+                    # person or a missing comma — genuinely worth flagging.
+                    # "Kalim Sukar" is not: Sukar is a known spelling of the
+                    # family, so it reads as given name plus surname.
+                    maybe_two=(
+                        plural
+                        and len(words) == 2
+                        and words[1].strip(understand.EDGE_PUNCTUATION).casefold()
+                        not in (family_names or set())
+                    ),
                 )
             )
             remarks = []
@@ -454,6 +461,10 @@ def parse(
     """
     known = {name.casefold() for name in (known_names or set())}
     mentions: list[Mention] = []
+
+    # A name mentioned on one line can own the next: "my parents are Kalim
+    # and Wadiha" followed by "Kalim's parents are..." — so every person the
+    # message introduces immediately joins the known set.
     loose_notes: list[str] = []
     remarks: list[tuple[str | None, str]] = []
 
@@ -475,7 +486,14 @@ def parse(
 
     def add(mention: Mention) -> None:
         mention.about = about
-        if not any(mention.same_person_as(seen) for seen in mentions):
+        known.add(mention.given_name.casefold())
+        duplicate = any(
+            mention.same_person_as(seen)
+            and mention.role == seen.role
+            and mention.about == seen.about
+            for seen in mentions
+        )
+        if not duplicate:
             mentions.append(mention)
 
     for raw_line in re.split(r"[\n;]+", text):
@@ -577,6 +595,10 @@ def parse(
         if found is not None:
             current_role, current_sex, pair_expected, plural, start, end = found
             prefix = line[:start].strip(" :,-—")
+            # "my brothers", "my parents" — first person resets the subject to
+            # the speaker, whoever an earlier line was about.
+            if re.search(r"\bmy\b", prefix, re.IGNORECASE):
+                about = None
             # "Kalims sisters are Dibeh and Sonia" — the word in front of the
             # relationship is a possessive naming somebody we already know,
             # not a relative called Kalims.

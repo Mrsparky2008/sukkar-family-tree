@@ -24,7 +24,9 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 import config
 import submissions
-from bot import dictation, flows, store, texts, understand
+import html as html_escape_module
+
+from bot import dictation, flows, sketch, store, texts, understand
 
 log = logging.getLogger(__name__)
 
@@ -81,16 +83,35 @@ def _button(label: str, data: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(label, callback_data=data)
 
 
-async def _say(update: Update, text: str, keyboard: InlineKeyboardMarkup | None = None):
+async def _say(
+    update: Update,
+    text: str,
+    keyboard: InlineKeyboardMarkup | None = None,
+    html: bool = False,
+):
     """Send a message, whether we arrived here by text or by button press."""
+    kwargs = dict(
+        reply_markup=keyboard,
+        disable_web_page_preview=True,
+        parse_mode=ParseMode.HTML if html else None,
+    )
     if update.callback_query is not None:
         await update.callback_query.answer()
-        return await update.callback_query.message.reply_text(
-            text, reply_markup=keyboard, disable_web_page_preview=True
-        )
-    return await update.effective_message.reply_text(
-        text, reply_markup=keyboard, disable_web_page_preview=True
+        return await update.callback_query.message.reply_text(text, **kwargs)
+    return await update.effective_message.reply_text(text, **kwargs)
+
+
+async def _sketch_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """The contributor's work so far, as a monospace drawing. May be empty."""
+    who = await store.contributor_state(update.effective_user.id)
+    drawing = sketch.build(
+        list(_basket(context)),
+        self_name=(who["label"] or "you").split(" (")[0],
+        self_father=who.get("father_given_name"),
     )
+    if not drawing:
+        return ""
+    return "<pre>" + html_escape_module.escape(drawing) + "</pre>"
 
 
 def _state(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
@@ -327,11 +348,21 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
                 )
             ],
         ]
-        await _say(
-            update,
-            f"{added}\n\n" + _climb_prompt(target["given_name"], target.get("sex"), mode),
-            _kb(rows),
+        message = html_escape_module.escape(
+            f"{added}\n\n"
+            + _climb_prompt(target["given_name"], target.get("sex"), mode)
         )
+        if len(_basket(context)) % 3 == 0:
+            drawing = await _sketch_of(update, context)
+            if drawing:
+                message = (
+                    html_escape_module.escape(added)
+                    + "\n\nSo far:\n" + drawing + "\n"
+                    + html_escape_module.escape(
+                        _climb_prompt(target["given_name"], target.get("sex"), mode)
+                    )
+                )
+        await _say(update, message, _kb(rows), html=True)
         return CLIMB
 
     return await _show_menu(update, context, added)
@@ -785,6 +816,9 @@ async def _known_names(
         first = (candidate["label"] or "").split()
         if first:
             names.add(first[0])
+    who = await store.contributor_state(update.effective_user.id)
+    if who.get("father_given_name"):
+        names.add(who["father_given_name"])
     return names
 
 
@@ -879,17 +913,16 @@ async def _absorb_dictation(
         lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
 
     # Lines can name people other than whoever the bot was asking about:
-    # "Hanna married Therese, kids are ...". Those hang off Hanna.
+    # "Hanna married Therese, kids are ...". Those hang off Hanna — who may
+    # be in the tree, in the basket, or introduced two lines up in this very
+    # message, so resolution happens as groups are stashed, not before.
     anchors: dict[str, dict[str, Any] | None] = {}
     for name in dict.fromkeys(m.about for m in reading.people if m.about):
         anchors[name] = await _resolve_named_subject(update, context, name)
-
-    unplaced = sorted(name for name, found in anchors.items() if found is None)
-    if unplaced:
-        lead_extra += texts.DICTATED_UNKNOWN_PEOPLE.format(
-            names=_join(unplaced)
-        )
-    placed = sorted(name for name, found in anchors.items() if found is not None)
+    unplaced: list[str] = []
+    placed = sorted(
+        name for name, found in anchors.items() if found is not None
+    )
     if placed:
         lead_extra += "\n\n" + texts.DICTATED_ABOUT_OTHERS.format(
             names=_join(placed)
@@ -916,11 +949,19 @@ async def _absorb_dictation(
     drafts_by_label: dict[str, str] = {}
 
     def subject_for(mention) -> dict[str, Any] | None:
-        """Whoever this mention hangs off: the line's own subject, or the cursor."""
+        """Whoever this mention hangs off: this message, the tree, or the cursor."""
         if not mention.about:
             return dict(about)
+        # Introduced earlier in this same message?
+        anchor = drafts_by_label.get(mention.about)
+        if anchor is not None:
+            subject = submissions.subject(label=mention.about)
+            subject["draft_id"] = anchor
+            return subject
         found = anchors.get(mention.about)
         if found is None:
+            if mention.about not in unplaced:
+                unplaced.append(mention.about)
             return None
         subject = submissions.subject(
             person_id=found["person_id"],
@@ -956,6 +997,11 @@ async def _absorb_dictation(
         draft_id = _draft_id(context)
         payload["_draft_id"] = draft_id
         _basket(context).append(payload)
+        # Everyone in this payload can now anchor later lines and later
+        # messages: "Kalim's parents are..." right after naming Kalim.
+        for entry in payload.get("people") or []:
+            drafts_by_label.setdefault(entry["given_name"], draft_id)
+            drafts_by_label.setdefault(submissions.person_label(entry), draft_id)
         return draft_id
 
     try:
@@ -1018,6 +1064,9 @@ async def _absorb_dictation(
         log.warning("dictation rejected for %s: %s", user_id, problem)
         return await _show_menu(update, context, texts.ERROR)
 
+    if unplaced:
+        lead_extra += texts.DICTATED_UNKNOWN_PEOPLE.format(names=_join(unplaced))
+
     lead = texts.DICTATED.format(count=len(reading)) + lead_extra
     guesses = list(
         dict.fromkeys(reason for m in reading.people for reason in m.uncertain)
@@ -1063,8 +1112,15 @@ async def _show_review(update: Update, context: ContextTypes.DEFAULT_TYPE, lead=
     rows.append([_button(texts.ADD_MORE, CB_CANCEL)])
 
     body = "\n".join(_basket_lines(basket))
-    parts = [part for part in (lead, texts.REVIEW_HEADING, body) if part]
-    await _say(update, "\n\n".join(parts), _kb(rows))
+    drawing = await _sketch_of(update, context)
+    parts = [
+        html_escape_module.escape(part) if part else ""
+        for part in (lead, texts.REVIEW_HEADING, body)
+        if part
+    ]
+    if drawing:
+        parts.insert(1 if lead else 0, drawing)
+    await _say(update, "\n\n".join(parts), _kb(rows), html=True)
     return REVIEW
 
 
