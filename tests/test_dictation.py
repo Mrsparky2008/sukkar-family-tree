@@ -379,3 +379,22 @@ class MarriagesInsideAListTests(unittest.TestCase):
         self.assertFalse(
             [m for m in reading.people if any("one person" in u for u in m.uncertain)]
         )
+
+
+class InstructionWordTests(unittest.TestCase):
+    """People give the bot instructions, not just facts."""
+
+    def test_add_x_as_my_sibling(self):
+        reading = dictation.parse("add Nawal as my sibling")
+        self.assertEqual(
+            [(m.role, m.given_name) for m in reading.people],
+            [(S.SIBLING, "Nawal")],
+        )
+
+    def test_instruction_words_never_become_people(self):
+        reading = dictation.parse("please add Nawal as my sister")
+        self.assertEqual([m.given_name for m in reading.people], ["Nawal"])
+
+    def test_a_sketch_request_mixed_in_still_parses_the_person(self):
+        reading = dictation.parse("Show me the sketch and add Nawal as my sibling")
+        self.assertEqual([m.given_name for m in reading.people], ["Nawal"])

@@ -53,6 +53,7 @@ ROLE_WORDS: list[tuple[str, str, str | None, bool]] = [
     ("sisters", submissions.SIBLING, "F", True),
     ("sister", submissions.SIBLING, "F", False),
     ("siblings", submissions.SIBLING, None, True),
+    ("sibling", submissions.SIBLING, None, False),
     ("sons", submissions.CHILD, "M", True),
     ("son", submissions.CHILD, "M", False),
     ("daughters", submissions.CHILD, "F", True),
@@ -116,6 +117,10 @@ FILLER = {
     "called", "grandparents", "grandparent", "grandfather", "grandmother",
     "grandad", "granddad", "grandma", "nan", "nanna", "jiddo", "teta",
     "i", "we", "you", "he", "she", "they", "them", "me", "him", "us",
+    # Words of instruction, not of identity: "add Nawal as my sibling".
+    "add", "adding", "as", "please", "put", "insert", "include", "record",
+    "register", "enter", "new", "another", "show", "sketch", "tree",
+    "drawing", "picture", "chart", "list", "want", "like", "need",
     "know", "think", "remember", "believe", "sure", "yes", "no", "ok",
     "sorry", "please", "thanks", "there", "here", "still", "already",
 }

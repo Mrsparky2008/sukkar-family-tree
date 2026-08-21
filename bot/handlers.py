@@ -1067,7 +1067,11 @@ async def _absorb_dictation(
     if unplaced:
         lead_extra += texts.DICTATED_UNKNOWN_PEOPLE.format(names=_join(unplaced))
 
-    lead = texts.DICTATED.format(count=len(reading)) + lead_extra
+    lead = (
+        texts.DICTATED_ONE
+        if len(reading) == 1
+        else texts.DICTATED.format(count=len(reading))
+    ) + lead_extra
     guesses = list(
         dict.fromkeys(reason for m in reading.people for reason in m.uncertain)
     )
@@ -1304,9 +1308,31 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _say(update, texts.HELP)
 
 
+def _asks_for_sketch(typed: str) -> bool:
+    import re as _re
+    return bool(
+        _re.search(r"\b(sketch|tree|drawing|picture|chart|so far)\b", typed, _re.I)
+    )
+
+
+async def _show_sketch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    drawing = await _sketch_of(update, context)
+    if not drawing:
+        return await _show_menu(update, context, texts.SKETCH_EMPTY)
+    await _say(
+        update,
+        html_escape_module.escape(texts.SKETCH_HEADING) + "\n" + drawing,
+        _menu_keyboard(_subject_name_or_none(context), len(_basket(context))),
+        html=True,
+    )
+    return MENU
+
+
 async def on_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The menu is where people rest, so it is where they start typing."""
     typed = update.effective_message.text or ""
+    if _asks_for_sketch(typed) and not dictation.looks_like_dictation(typed):
+        return await _show_sketch(update, context)
     if dictation.looks_like_dictation(typed):
         reading = dictation.parse(
             typed,

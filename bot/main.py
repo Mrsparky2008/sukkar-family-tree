@@ -63,6 +63,10 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             handlers.MENU: [
                 CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 CallbackQueryHandler(handlers.on_menu, pattern=r"^menu:"),
+                # "Add someone else" and Cancel both land here when a reply
+                # re-drew the menu without changing state; dead buttons read
+                # as a broken bot.
+                cancel_button,
                 MessageHandler(TEXT_ANSWER, handlers.on_menu_text),
             ],
             handlers.ASK: [

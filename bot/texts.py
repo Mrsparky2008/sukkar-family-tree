@@ -217,6 +217,8 @@ DICTATED = (
     "Here's what I understood. Tap anything that's wrong."
 )
 
+DICTATED_ONE = "Got it. Here's what I understood — tap it if it's wrong."
+
 #: Only ever list what was actually guessed. Warning about a guess the bot
 #: did not make teaches people to ignore the warnings.
 DICTATED_UNSURE = "\n\nI guessed at: {reasons}. Worth a look."
@@ -236,6 +238,13 @@ DICTATED_REMARK = "Noted about {name}: {remark}."
 DICTATED_SUBJECT_UNKNOWN = (
     "You've told me about {name}'s family, but I don't know who {name} is yet.\n\n"
     "Add {name} first — then tell me this again and it'll slot straight in."
+)
+
+SKETCH_HEADING = "What you've built so far:"
+
+SKETCH_EMPTY = (
+    "Nothing on the sketch yet — everything you'd added has already been "
+    "sent for review. Add somebody and it starts again."
 )
 
 MENU_TYPE_HINT = (
