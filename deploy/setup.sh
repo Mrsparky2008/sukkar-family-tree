@@ -11,6 +11,10 @@ REPO="${repository}"
 BRANCH="${branch}"
 BUCKET="${bucket}"
 REGION="${region}"
+TOKEN="${telegram_token}"
+ADMIN_PASSWORD="${admin_password}"
+BACKUP_KEY="${backup_key}"
+BACKUP_SECRET="${backup_secret}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
@@ -44,22 +48,22 @@ chmod 750 "$DATA"
 
 if [ ! -f "$APP/.env" ]; then
   cat > "$APP/.env" <<ENV
-# Paste the token from @BotFather between the equals sign and the end of the
-# line, then: sudo systemctl restart family-tree
-TELEGRAM_BOT_TOKEN=
+# The token from @BotFather. If blank, paste it in and then:
+#   sudo systemctl restart family-tree
+TELEGRAM_BOT_TOKEN=$TOKEN
 
-# Password for the review interface. Pick one and share it with your branch
-# admins; their Telegram ID decides what each of them can see.
-ADMIN_PASSWORD=
+# Password for the review interface. Share it with your branch admins; their
+# Telegram ID decides what each of them can see.
+ADMIN_PASSWORD=$ADMIN_PASSWORD
 
 # Signs the review interface's login sessions. Generated at setup.
 SECRET_KEY=$(openssl rand -hex 32)
 
 FAMILY_TREE_DB=$DATA/family.db
 
-# Written by setup.sh so nightly backups can reach S3.
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
+# So nightly backups can reach S3.
+AWS_ACCESS_KEY_ID=$BACKUP_KEY
+AWS_SECRET_ACCESS_KEY=$BACKUP_SECRET
 AWS_DEFAULT_REGION=$REGION
 BACKUP_BUCKET=$BUCKET
 ENV

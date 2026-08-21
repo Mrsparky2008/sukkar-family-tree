@@ -62,6 +62,26 @@ variable "branch" {
   default     = "main"
 }
 
+variable "telegram_bot_token" {
+  description = <<-TEXT
+    The bot token from @BotFather. Optional: leave empty and paste it into
+    /opt/family-tree/.env over SSH instead. When set, it is written into .env
+    at first boot — which also means it is visible in the instance's user
+    data and in Terraform state, so use this path only when the person
+    deploying cannot SSH (and rotate the token later if that bothers you).
+  TEXT
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
+variable "admin_password" {
+  description = "Password for the review interface. Optional, same trade as the token."
+  type      = string
+  default   = ""
+  sensitive = true
+}
+
 variable "ssh_key_name" {
   description = <<-TEXT
     Name of an existing Lightsail key pair to log in with. Leave empty and
@@ -83,10 +103,14 @@ resource "aws_lightsail_instance" "bot" {
   key_pair_name     = var.ssh_key_name != "" ? var.ssh_key_name : null
 
   user_data = templatefile("${path.module}/setup.sh", {
-    repository = var.repository
-    branch     = var.branch
-    bucket     = local.bucket_name
-    region     = var.region
+    repository     = var.repository
+    branch         = var.branch
+    bucket         = local.bucket_name
+    region         = var.region
+    telegram_token = var.telegram_bot_token
+    admin_password = var.admin_password
+    backup_key     = aws_iam_access_key.backup.id
+    backup_secret  = aws_iam_access_key.backup.secret
   })
 
   tags = {

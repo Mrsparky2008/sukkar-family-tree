@@ -34,3 +34,10 @@ htmlcov/
 *.swp
 .DS_Store
 Thumbs.db
+
+# Terraform working files — provider binaries and state (state holds secrets)
+deploy/.terraform/
+deploy/.terraform.lock.hcl
+deploy/*.tfstate
+deploy/*.tfstate.backup
+deploy/*.tfvars
