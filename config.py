@@ -50,6 +50,21 @@ _load_env_file(BASE_DIR / ".env")
 #: who married into the family keep their own family name in the `people` row.
 FAMILY_NAME = "Sukkar"
 
+#: Every spelling of the SAME family. Arabic transliteration is not
+#: standardised, so branches that emigrated to different countries were
+#: written down differently by whoever was at the desk — and that spelling is
+#: now on their passports. They are one family and must match each other, but
+#: each person keeps the spelling they actually use.
+#:
+#: FAMILY_NAME above is the canonical form: used for matching, for grouping
+#: branches, and as the default. It does not overwrite what a person tells us.
+FAMILY_NAME_VARIANTS = [
+    "Sukkar",
+    "Sukar",
+    "Succar",
+    "Soukkar",
+]
+
 #: Arabic script rendering of the family name. Optional; used in the bot
 #: greeting and the public page heading when present.
 FAMILY_NAME_AR = "سكر"

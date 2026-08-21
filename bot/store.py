@@ -57,6 +57,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         "branch_id": row["branch_id"] if row else None,
         "label": row["display_label"] if row else None,
         "identify_submission_id": None,
+        "father_given_name": None,
     }
 
     if state["person_id"] is not None:
@@ -64,6 +65,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         if person is not None:
             state["label"] = db.row_display_name(person)
             state["branch_id"] = person["branch_id"]
+            state["father_given_name"] = person["father_given_name"]
         return state
 
     # Not linked to anyone yet. Their own identity may still be in the queue,
@@ -73,8 +75,10 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         if payload.get("kind") == submissions.IDENTIFY:
             state["identify_submission_id"] = row["id"]
             entries = payload.get("people") or []
-            if entries and not state["label"]:
-                state["label"] = submissions.person_label(entries[0])
+            if entries:
+                if not state["label"]:
+                    state["label"] = submissions.person_label(entries[0])
+                state["father_given_name"] = entries[0].get("father_given_name")
             break
 
     return state

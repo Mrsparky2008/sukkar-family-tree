@@ -127,6 +127,14 @@ class Conversation:
             if data is None and isinstance(handler, MessageHandler):
                 self.state = await handler.callback(update, self.context)
                 return self.state
+        # Nothing in this state matched. Real PTB then tries the fallbacks,
+        # which is how stray text at a menu gets a polite answer instead of
+        # silence — so the harness has to try them too.
+        for handler in self._conversation_handler.fallbacks:
+            if data is None and isinstance(handler, MessageHandler):
+                self.state = await handler.callback(update, self.context)
+                return self.state
+
         raise AssertionError(
             f"nothing in state {self.state} handles "
             f"{'button ' + repr(data) if data else 'typed text'}"

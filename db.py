@@ -724,6 +724,29 @@ def admin_branch_ids(
 # ===========================================================================
 
 
+def canonical_family_name(family_name: str | None) -> str:
+    """Fold a spelling variant onto the family's canonical form.
+
+    Arabic transliteration is not standardised, so the same family reaches
+    four countries spelled four ways. Those spellings are one family: matching
+    has to see them as the same, while display must not. The variants live in
+    config.FAMILY_NAME_VARIANTS. A name that is not one of them comes back as
+    given — someone who married in keeps their own family name.
+    """
+    if not family_name:
+        return config.FAMILY_NAME
+    cleaned = family_name.strip()
+    for variant in config.FAMILY_NAME_VARIANTS:
+        if variant.casefold() == cleaned.casefold():
+            return config.FAMILY_NAME
+    return cleaned
+
+
+def same_family(a: str | None, b: str | None) -> bool:
+    """Whether two family names are the same family, spelling aside."""
+    return canonical_family_name(a).casefold() == canonical_family_name(b).casefold()
+
+
 def name_similarity(a: str, b: str) -> float:
     """Rough similarity of two given names, 0-1, case and accent tolerant."""
     return SequenceMatcher(None, a.strip().casefold(), b.strip().casefold()).ratio()

@@ -29,6 +29,13 @@ WELCOME = (
 
 ASK_SELF_GIVEN = "What's your first name?"
 
+#: The family name is asked, never assumed. There are several spellings of the
+#: same family — they are the same people, written down by different clerks in
+#: different countries — and the one on a person's passport is theirs to keep.
+ASK_SELF_FAMILY = "And how do you spell your family name?"
+FAMILY_OTHER = "Something else"
+ASK_FAMILY_OTHER = "How do you spell it?"
+
 ASK_SELF_FATHER = "And your father's first name?"
 
 ASK_SELF_FATHER_WHY = (
@@ -144,6 +151,8 @@ def ask_child_sex(subject: str | None) -> str:
 
 # --- shared prompts --------------------------------------------------------
 
+#: Kept for the edit screen. Names are no longer confirmed one at a time —
+#: it doubled every interaction, and everything is editable before it sends.
 CONFIRM_NAME = "{name} — have I spelled that right?"
 
 YES = "Yes"
@@ -191,6 +200,31 @@ SOURCE_ASK = (
 CANCELLED = "Dropped that one. Nothing was saved."
 
 CONFIRM_SUBMISSION = "Here's what I'll send:"
+
+# --- the basket ------------------------------------------------------------
+
+ADDED = "Got it — {summary}."
+
+REVIEW_SEND = "Review and send ({count})"
+
+REVIEW_HEADING = (
+    "Here's everything you've given me. Check the spelling — tap any line to "
+    "change it."
+)
+
+REVIEW_EMPTY = "You haven't added anyone yet."
+
+SEND_ALL = "Send all {count}"
+
+EDIT_ASK = "What should {name} be?"
+
+EDITED = "Changed to {name}."
+
+REMOVE = "Remove this one"
+
+REMOVED = "Removed."
+
+ADD_MORE = "Add someone else"
 
 SEND_IT = "Send it"
 START_OVER = "Start over"

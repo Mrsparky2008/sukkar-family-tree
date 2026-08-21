@@ -40,7 +40,9 @@ log = logging.getLogger(__name__)
     PICK_SUBJECT,
     CLIMB,
     ASK_SOURCE,
-) = range(9)
+    REVIEW,
+    EDIT_VALUE,
+) = range(11)
 
 # --- callback data ---------------------------------------------------------
 
@@ -60,6 +62,10 @@ CB_SWITCH = "menu:switch"
 CB_CLIMB_YES = "climb:yes"
 CB_CLIMB_NO = "climb:no"
 CB_SOURCE = "source"
+CB_REVIEW = "menu:review"
+CB_EDIT = "edit"
+CB_SEND_ALL = "sendall"
+CB_REMOVE = "remove"
 
 
 # ===========================================================================
@@ -92,7 +98,24 @@ def _state(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
 
 
 def _reset(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Clear the current flow. The basket and the cursor survive."""
     context.user_data.pop("flow", None)
+
+
+def _basket(context: ContextTypes.DEFAULT_TYPE) -> list[dict[str, Any]]:
+    """Everything collected but not yet sent.
+
+    Nothing goes to the queue until the contributor has seen the whole list.
+    They are typing names from memory, so the place to catch a misspelling is
+    a list they can read, not a yes/no after every single answer.
+    """
+    return context.user_data.setdefault("basket", [])
+
+
+def _draft_id(context: ContextTypes.DEFAULT_TYPE) -> str:
+    counter = context.user_data.get("draft_counter", 0) + 1
+    context.user_data["draft_counter"] = counter
+    return f"d{counter}"
 
 
 def _cursor(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
@@ -111,11 +134,14 @@ async def _subject_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dic
     """The cursor as a payload subject, defaulting to the contributor."""
     cursor = _cursor(context)
     if cursor is not None:
-        return submissions.subject(
+        about = submissions.subject(
             person_id=cursor.get("person_id"),
             submission_id=cursor.get("submission_id"),
             label=cursor.get("label"),
         )
+        if cursor.get("draft_id"):
+            about["draft_id"] = cursor["draft_id"]
+        return about
     who = await store.contributor_state(update.effective_user.id)
     return submissions.subject(
         person_id=who["person_id"],
@@ -129,11 +155,17 @@ def _subject_name(context: ContextTypes.DEFAULT_TYPE) -> str:
     return cursor["label"] if cursor else texts.SUBJECT_YOU
 
 
-def _menu_keyboard(subject: str | None = None) -> InlineKeyboardMarkup:
+def _menu_keyboard(
+    subject: str | None = None, basket_size: int = 0
+) -> InlineKeyboardMarkup:
     labels = texts.menu_labels(subject)
     rows = [
         [_button(labels[key], f"{CB_MENU}:{flow.kind}")] for key, flow in flows.MENU
     ]
+    if basket_size:
+        rows.insert(
+            0, [_button(texts.REVIEW_SEND.format(count=basket_size), CB_REVIEW)]
+        )
     rows.append([_button(texts.MENU_SWITCH, CB_SWITCH)])
     rows.append([_button(texts.MENU_FIX, f"{CB_MENU}:{submissions.CORRECTION}")])
     rows.append([_button(texts.MENU_VIEW, f"{CB_MENU}:view")])
@@ -149,7 +181,7 @@ async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: s
         # Only worth saying when it is not the obvious default.
         parts.append(texts.SUBJECT_HEADING.format(name=name))
     parts.append(texts.MENU_PROMPT)
-    await _say(update, "\n\n".join(parts), _menu_keyboard(name))
+    await _say(update, "\n\n".join(parts), _menu_keyboard(name, len(_basket(context))))
     return MENU
 
 
@@ -237,20 +269,62 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
     if flow.kind == submissions.IDENTIFY:
         return await _offer_identity_matches(update, context, payload)
 
-    lines = "\n".join(submissions.detail_lines(payload))
-    await _say(
-        update,
-        f"{texts.CONFIRM_SUBMISSION}\n\n{lines}",
-        _kb(
+    if flow.kind == submissions.CORRECTION:
+        # A correction is one thing about one thing; batching it would be odd.
+        lines = "\n".join(submissions.detail_lines(payload))
+        await _say(
+            update,
+            f"{texts.CONFIRM_SUBMISSION}\n\n{lines}",
+            _kb(
+                [
+                    [_button(texts.SEND_IT, CB_SEND)],
+                    [_button(texts.CANCEL, CB_CANCEL)],
+                ]
+            ),
+        )
+        return CONFIRM_SUBMIT
+
+    draft_id = _draft_id(context)
+    payload["_draft_id"] = draft_id
+    _basket(context).append(payload)
+    _reset(context)
+    return await _after_add(update, context, payload)
+
+
+async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
+    """Confirm what went in the basket and offer the obvious next step."""
+    added = texts.ADDED.format(summary=submissions.describe(payload))
+
+    entries = [
+        entry
+        for entry in payload.get("people") or []
+        if entry.get("role") != submissions.SELF
+    ]
+    entries.sort(key=lambda e: 0 if e["role"] == submissions.FATHER else 1)
+
+    if entries:
+        target = entries[0]
+        context.user_data["climb_to"] = {
+            "label": submissions.person_label(target),
+            "draft_id": payload["_draft_id"],
+        }
+        rows = [
+            [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
+            [_button(texts.ADD_MORE, CB_CLIMB_NO)],
             [
-                [_button(texts.SEND_IT, CB_SEND)],
-                [_button(texts.SOURCE_BUTTON, CB_SOURCE)],
-                [_button(texts.START_OVER, CB_OVER)],
-                [_button(texts.CANCEL, CB_CANCEL)],
-            ]
-        ),
-    )
-    return CONFIRM_SUBMIT
+                _button(
+                    texts.REVIEW_SEND.format(count=len(_basket(context))), CB_REVIEW
+                )
+            ],
+        ]
+        await _say(
+            update,
+            f"{added}\n\n" + texts.CLIMB_PARENTS.format(name=target["given_name"]),
+            _kb(rows),
+        )
+        return CLIMB
+
+    return await _show_menu(update, context, added)
 
 
 # ===========================================================================
@@ -343,13 +417,28 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return await _show_menu(update, context, text)
 
+    if choice == "review":
+        return await _show_review(update, context)
+
     if choice == "switch":
         return await _pick_subject(update, context)
 
     if choice == submissions.CORRECTION:
         return await _start_correction(update, context)
 
-    _begin(context, flows.BY_KIND[choice])
+    flow = flows.BY_KIND[choice]
+    _begin(context, flow)
+
+    if flow.kind == submissions.ADD_PARENTS and _cursor(context) is None:
+        # They told us their father's name when they signed up. Asking again
+        # two minutes later reads as if the bot was not listening.
+        who = await store.contributor_state(update.effective_user.id)
+        known = who.get("father_given_name")
+        if known:
+            state = _state(context)
+            state["answers"]["father_given"] = known
+            state["index"] = 1
+
     return await _ask(update, context)
 
 
@@ -378,19 +467,13 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _say(update, str(problem))
         return await _ask(update, context)
 
-    state["pending"] = value
-    await _say(
-        update,
-        texts.CONFIRM_NAME.format(name=value),
-        _kb(
-            [
-                [_button(texts.YES, CB_YES)],
-                [_button(texts.NO_RETYPE, CB_NO)],
-                [_button(texts.CANCEL, CB_CANCEL)],
-            ]
-        ),
-    )
-    return CONFIRM_ANSWER
+    # No read-back. Confirming every single name doubled the taps and made the
+    # whole thing feel like a form. Everything is checkable and editable on the
+    # review screen before it sends, which is where a misspelling actually gets
+    # noticed anyway.
+    state["answers"][step.id] = value
+    state["index"] += 1
+    return await _ask(update, context)
 
 
 async def on_answer_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -550,20 +633,20 @@ async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == CB_CLIMB_NO:
-        return await _show_menu(update, context, texts.DEAD_END)
+        return await _show_menu(update, context)
 
-    # The person we just named is still in the queue, so point the cursor at
-    # their submission rather than waiting on an admin.
+    # The person we just named is still in the basket, so point the cursor at
+    # the draft. Send resolves it to a real submission id.
     target = context.user_data.get("climb_to") or {}
-    submission_id = context.user_data.get("last_submission_id")
-    if not target or submission_id is None:
+    if not target:
         return await _show_menu(update, context, texts.ERROR)
 
     _set_cursor(
         context,
         {
             "person_id": None,
-            "submission_id": submission_id,
+            "submission_id": None,
+            "draft_id": target.get("draft_id"),
             "label": target["label"],
         },
     )
@@ -593,6 +676,134 @@ async def on_source_given(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _say(update, str(problem))
         return ASK_SOURCE
     return await _send(update, context, payload)
+
+
+# ===========================================================================
+# Review and send
+# ===========================================================================
+#
+# One screen showing everything collected, every line editable. This is where
+# a misspelling actually gets caught — reading back a list is a different act
+# from answering yes to one name at a time.
+# ===========================================================================
+
+
+def _basket_lines(basket: list[dict[str, Any]]) -> list[str]:
+    return [
+        f"{index}. {submissions.describe(payload)}"
+        for index, payload in enumerate(basket, start=1)
+    ]
+
+
+async def _show_review(update: Update, context: ContextTypes.DEFAULT_TYPE, lead=None):
+    basket = _basket(context)
+    if not basket:
+        return await _show_menu(update, context, texts.REVIEW_EMPTY)
+
+    rows = []
+    for index, payload in enumerate(basket):
+        entry = submissions.primary_person(payload)
+        label = submissions.person_label(entry) if entry else f"item {index + 1}"
+        rows.append([_button(_trim(f"{index + 1}. {label}"), f"{CB_EDIT}:{index}")])
+    rows.append(
+        [_button(texts.SEND_ALL.format(count=len(basket)), CB_SEND_ALL)]
+    )
+    rows.append([_button(texts.ADD_MORE, CB_CANCEL)])
+
+    body = "\n".join(_basket_lines(basket))
+    parts = [part for part in (lead, texts.REVIEW_HEADING, body) if part]
+    await _say(update, "\n\n".join(parts), _kb(rows))
+    return REVIEW
+
+
+async def on_review(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    return await _show_review(update, context)
+
+
+async def on_edit_pick(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    index = int(query.data.split(":", 1)[1])
+    basket = _basket(context)
+    if index >= len(basket):
+        return await _show_review(update, context, texts.ERROR)
+
+    entry = submissions.primary_person(basket[index])
+    context.user_data["editing"] = index
+    await _say(
+        update,
+        texts.EDIT_ASK.format(name=submissions.person_label(entry)),
+        _kb(
+            [
+                [_button(texts.REMOVE, CB_REMOVE)],
+                [_button(texts.CANCEL, CB_CANCEL)],
+            ]
+        ),
+    )
+    return EDIT_VALUE
+
+
+async def on_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    index = context.user_data.get("editing")
+    basket = _basket(context)
+    if index is None or index >= len(basket):
+        return await _show_review(update, context, texts.ERROR)
+
+    try:
+        value = flows.clean_name(update.effective_message.text or "")
+    except flows.FlowError as problem:
+        await _say(update, str(problem))
+        return EDIT_VALUE
+
+    entry = submissions.primary_person(basket[index])
+    entry["given_name"] = value
+    context.user_data.pop("editing", None)
+    return await _show_review(update, context, texts.EDITED.format(name=value))
+
+
+async def on_edit_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    index = context.user_data.pop("editing", None)
+    basket = _basket(context)
+    if index is not None and index < len(basket):
+        removed = basket.pop(index)
+        # Anything that hung off the removed draft has lost its anchor.
+        orphan = removed.get("_draft_id")
+        for payload in list(basket):
+            if orphan and (payload.get("about") or {}).get("draft_id") == orphan:
+                basket.remove(payload)
+    return await _show_review(update, context, texts.REMOVED)
+
+
+async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Queue the whole basket, oldest first, resolving draft references."""
+    await update.callback_query.answer()
+    basket = _basket(context)
+    if not basket:
+        return await _show_menu(update, context, texts.REVIEW_EMPTY)
+
+    user_id = update.effective_user.id
+    draft_to_submission: dict[str, int] = {}
+    sent = 0
+
+    for payload in basket:
+        about = payload.get("about") or {}
+        anchor = about.pop("draft_id", None)
+        if anchor:
+            # The parent draft was sent a moment ago; point at its real row.
+            about["submission_id"] = draft_to_submission.get(anchor)
+        draft_id = payload.pop("_draft_id", None)
+
+        result = await store.queue(user_id, payload)
+        if draft_id:
+            draft_to_submission[draft_id] = result["submission_id"]
+        sent += 1
+
+    context.user_data["basket"] = []
+    context.user_data.pop("draft_counter", None)
+    _set_cursor(context, None)
+    return await _show_menu(update, context, texts.SAVED)
 
 
 # ===========================================================================

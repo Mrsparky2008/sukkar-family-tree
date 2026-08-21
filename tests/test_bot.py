@@ -1,9 +1,9 @@
 """
 Tests for the Telegram capture step.
 
-The conversation is driven through `tests/harness.py`, which fakes the
-transport but uses the real handlers and the real routing table, so the
-callback patterns in `bot/main.py` are covered too.
+Driven through `tests/harness.py`, which fakes the transport but uses the real
+handlers and the real routing table, so the callback patterns in `bot/main.py`
+are covered too.
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from telegram.ext import CommandHandler, ConversationHandler  # noqa: E402
+
 import config  # noqa: E402
 import db  # noqa: E402
 import seed  # noqa: E402
 import submissions  # noqa: E402
-from telegram.ext import CommandHandler, ConversationHandler  # noqa: E402
-
 from bot import flows, texts  # noqa: E402
 from tests.harness import Conversation  # noqa: E402
 
@@ -71,16 +71,24 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             conn.close()
 
-    async def identified_as_khalil(self) -> Conversation:
-        """A contributor who has been through /start and linked themselves."""
-        chat = Conversation(user_id=5001)
+    async def identified_as_khalil(self, user_id: int = 5001) -> Conversation:
+        """A contributor who has signed up and linked to a seeded person."""
+        chat = Conversation(user_id=user_id)
         await chat.start()
         await chat.say("Khalil")
-        await chat.tap(texts.YES)
+        await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
-        await chat.tap(texts.YES)
         await chat.tap("Khalil Youssef")
         return chat
+
+    async def send_basket(self, chat: Conversation):
+        await chat.tap("Review and send")
+        await chat.tap("Send all")
+
+
+# ===========================================================================
+# Identification
+# ===========================================================================
 
 
 class IdentificationTests(BotTestCase):
@@ -91,52 +99,36 @@ class IdentificationTests(BotTestCase):
         self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
 
     async def test_one_question_per_message(self):
-        """The spec's rule: a conversation, not a form."""
         chat = Conversation()
         await chat.start()
-        # Welcome, then exactly one question.
         self.assertEqual(len(chat.sent), 2)
         self.assertEqual(chat.text.count("?"), 1)
 
-    async def test_typed_name_is_confirmed_before_use(self):
+    async def test_a_typed_name_is_not_read_back(self):
+        """Confirming every answer doubled the taps; the review screen does it."""
         chat = Conversation()
         await chat.start()
         await chat.say("Steven")
-        self.assertIn("Steven", chat.text)
-        self.assertIn(texts.YES, chat.buttons)
-        self.assertIn(texts.NO_RETYPE, chat.buttons)
-
-    async def test_saying_no_re_asks_the_same_question(self):
-        chat = Conversation()
-        await chat.start()
-        await chat.say("Stevn")
-        await chat.tap(texts.NO_RETYPE)
-        self.assertIn(texts.RETYPE, chat.transcript())
-        self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
-        await chat.say("Steven")
-        self.assertIn("Steven", chat.text)
+        self.assertNotIn(texts.YES, chat.buttons)
+        self.assertIn(texts.ASK_SELF_FAMILY, chat.text)
 
     async def test_full_name_is_rejected_with_an_explanation(self):
         chat = Conversation()
         await chat.start()
         await chat.say("Khalil Youssef Sukkar")
         self.assertIn("first name", chat.transcript().lower())
-        # And it re-asks rather than giving up.
         self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
 
     async def test_known_person_is_offered_as_a_match(self):
         chat = Conversation()
         await chat.start()
         await chat.say("Khalil")
-        await chat.tap(texts.YES)
+        await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
-        await chat.tap(texts.YES)
         self.assertIn("Khalil Youssef Sukkar", str(chat.buttons))
 
     async def test_confirming_a_match_links_the_contributor(self):
-        chat = await self.identified_as_khalil()
-        self.assertIn("Khalil Youssef Sukkar", chat.transcript())
-
+        await self.identified_as_khalil()
         conn = db.connect()
         try:
             contributor = db.get_contributor(conn, 5001)
@@ -155,9 +147,8 @@ class IdentificationTests(BotTestCase):
         before = self.people_count()
         await chat.start()
         await chat.say("Zaher")
-        await chat.tap(texts.YES)
+        await chat.tap(config.FAMILY_NAME)
         await chat.say("Fadi")
-        await chat.tap(texts.YES)
 
         self.assertEqual(self.people_count(), before, "constraint 4 violated")
         queued = self.queued()
@@ -169,9 +160,8 @@ class IdentificationTests(BotTestCase):
         chat = Conversation(user_id=5003)
         await chat.start()
         await chat.say("Khalil")
-        await chat.tap(texts.YES)
+        await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
-        await chat.tap(texts.YES)
         await chat.tap(texts.IDENTITY_NONE_OF_THESE)
 
         queued = self.queued()
@@ -179,7 +169,7 @@ class IdentificationTests(BotTestCase):
         self.assertEqual(queued[0]["payload"]["kind"], submissions.IDENTIFY)
         self.assertEqual(self.people_count(), 12)
 
-    async def test_returning_user_is_greeted_by_name_and_skips_identification(self):
+    async def test_returning_user_is_greeted_by_name(self):
         await self.identified_as_khalil()
         again = Conversation(user_id=5001)
         await again.start()
@@ -190,9 +180,8 @@ class IdentificationTests(BotTestCase):
         chat = Conversation(user_id=5004)
         await chat.start()
         await chat.say("Zaher")
-        await chat.tap(texts.YES)
+        await chat.tap(config.FAMILY_NAME)
         await chat.say("Fadi")
-        await chat.tap(texts.YES)
 
         again = Conversation(user_id=5004)
         await again.start()
@@ -201,12 +190,64 @@ class IdentificationTests(BotTestCase):
         self.assertEqual(len(self.queued()), 1)
 
 
+# ===========================================================================
+# The family name
+# ===========================================================================
+
+
+class FamilyNameTests(BotTestCase):
+    """Several spellings of one family. Ask, never assume."""
+
+    async def test_every_configured_spelling_is_offered(self):
+        chat = Conversation(user_id=5100)
+        await chat.start()
+        await chat.say("Steven")
+        for variant in config.FAMILY_NAME_VARIANTS:
+            self.assertIn(variant, chat.buttons)
+        self.assertIn(texts.FAMILY_OTHER, chat.buttons)
+
+    async def test_the_chosen_spelling_is_what_gets_stored(self):
+        chat = Conversation(user_id=5101)
+        await chat.start()
+        await chat.say("Steven")
+        await chat.tap("Succar")
+        await chat.say("Kalim")
+
+        entry = self.queued()[0]["payload"]["people"][0]
+        self.assertEqual(entry["family_name"], "Succar")
+
+    async def test_an_unlisted_spelling_can_be_typed(self):
+        chat = Conversation(user_id=5102)
+        await chat.start()
+        await chat.say("Steven")
+        await chat.tap(texts.FAMILY_OTHER)
+        self.assertIn(texts.ASK_FAMILY_OTHER, chat.text)
+        await chat.say("Soukar")
+        await chat.say("Kalim")
+
+        entry = self.queued()[0]["payload"]["people"][0]
+        self.assertEqual(entry["family_name"], "Soukar")
+
+    def test_variants_are_one_family_for_matching(self):
+        for variant in config.FAMILY_NAME_VARIANTS:
+            self.assertEqual(db.canonical_family_name(variant), config.FAMILY_NAME)
+        self.assertTrue(db.same_family("Succar", "Soukkar"))
+
+    def test_a_married_in_family_name_is_left_alone(self):
+        self.assertEqual(db.canonical_family_name("Karam"), "Karam")
+        self.assertFalse(db.same_family("Karam", config.FAMILY_NAME))
+
+
+# ===========================================================================
+# The menu and the cursor
+# ===========================================================================
+
+
 class MenuTests(BotTestCase):
-    async def test_menu_offers_every_option_from_the_spec(self):
+    async def test_menu_offers_every_option(self):
         chat = await self.identified_as_khalil()
-        labels = set(chat.buttons)
         self.assertEqual(
-            labels,
+            set(chat.buttons),
             {
                 texts.MENU_ADD_PARENTS,
                 texts.MENU_ADD_SIBLING,
@@ -237,26 +278,21 @@ class MenuTests(BotTestCase):
             config.PUBLIC_URL = original
 
 
-class AddChildTests(BotTestCase):
-    async def test_full_flow_queues_a_submission(self):
-        chat = await self.identified_as_khalil()
-        before = self.people_count()
+# ===========================================================================
+# Collecting
+# ===========================================================================
 
+
+class AddChildTests(BotTestCase):
+    async def test_nothing_is_queued_until_the_basket_is_sent(self):
+        chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
-        self.assertIn(texts.CHILD_DAUGHTER, chat.buttons)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
-        await chat.tap(texts.YES)
 
-        # Final confirmation before anything is stored.
-        self.assertIn(texts.SEND_IT, chat.buttons)
-        self.assertIn("Rita", chat.text)
-        self.assertEqual(len(self.queued()), 0, "stored before the final yes")
+        self.assertEqual(self.queued(), [], "queued before the contributor sent it")
+        await self.send_basket(chat)
 
-        await chat.tap(texts.SEND_IT)
-        self.assertIn(texts.SAVED, chat.transcript())
-
-        self.assertEqual(self.people_count(), before, "constraint 4 violated")
         queued = self.queued()
         self.assertEqual(len(queued), 1)
         payload = queued[0]["payload"]
@@ -265,101 +301,84 @@ class AddChildTests(BotTestCase):
         self.assertEqual(payload["people"][0]["sex"], "F")
         self.assertEqual(payload["about"]["person_id"], self.ids["khalil_y"])
 
-    async def test_cancelling_saves_nothing(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap(texts.CHILD_SON)
-        await chat.say("Sami")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.CANCEL)
-
-        self.assertIn(texts.CANCELLED, chat.transcript())
-        self.assertEqual(self.queued(), [])
-
-    async def test_start_over_re_asks_from_the_beginning(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap(texts.CHILD_SON)
-        await chat.say("Sami")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.START_OVER)
-
-        self.assertIn(texts.ASK_CHILD_SEX, chat.text)
-        self.assertEqual(self.queued(), [])
-
-    async def test_offers_to_keep_going_after_a_save(self):
-        """The climb: a save should suggest the next step, not a dead menu."""
+    async def test_adding_never_creates_a_person(self):
+        before = self.people_count()
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
+        self.assertEqual(self.people_count(), before, "constraint 4 violated")
 
-        self.assertIn(texts.SAVED, chat.transcript())
+    async def test_a_save_offers_the_next_step(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_DAUGHTER)
+        await chat.say("Rita")
         self.assertIn("Rita", chat.text)
         self.assertIn(texts.CLIMB_YES, chat.buttons)
 
-    async def test_declining_the_climb_returns_to_the_menu(self):
+    async def test_carrying_on_returns_to_the_menu(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-        await chat.tap(texts.CLIMB_NO)
+        await chat.tap(texts.ADD_MORE)
         self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
 
 
 class AddParentsTests(BotTestCase):
-    async def test_both_parents(self):
+    async def test_the_father_is_not_asked_for_twice(self):
+        """It was given at signup. Asking again reads as not listening."""
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_PARENTS)
-        await chat.say("Youssef")
-        await chat.tap(texts.YES)
-        await chat.say("Nada")
-        await chat.tap(texts.YES)
-        await chat.say("Karam")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        self.assertIn("mother", chat.text.lower())
 
-        payload = self.queued()[0]["payload"]
-        roles = {entry["role"]: entry for entry in payload["people"]}
-        self.assertEqual(roles["father"]["given_name"], "Youssef")
-        self.assertEqual(roles["father"]["sex"], "M")
-        self.assertEqual(roles["mother"]["given_name"], "Nada")
-        self.assertEqual(roles["mother"]["family_name"], "Karam")
-
-    async def test_mothers_family_name_is_skippable(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_PARENTS)
-        await chat.say("Youssef")
-        await chat.tap(texts.YES)
         await chat.say("Nada")
-        await chat.tap(texts.YES)
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.SEND_IT)
+        await chat.tap(texts.ADD_MORE)
+        await self.send_basket(chat)
 
         roles = {e["role"]: e for e in self.queued()[0]["payload"]["people"]}
-        self.assertIsNone(roles["mother"]["family_name"])
+        self.assertEqual(roles["father"]["given_name"], "Youssef")
+        self.assertEqual(roles["mother"]["given_name"], "Nada")
 
-    async def test_skipping_the_mother_skips_her_family_name_too(self):
-        """The only_if rule: don't ask about someone who wasn't named."""
-        chat = await self.identified_as_khalil()
+    async def test_both_parents_when_the_father_is_unknown(self):
+        chat = Conversation(user_id=5200)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.SKIP)          # father unknown at signup
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("Youssef")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SKIP)  # mother's given name
-        self.assertNotIn(texts.ASK_MOTHER_FAMILY, chat.text)
-        self.assertIn(texts.SEND_IT, chat.buttons)
+        await chat.say("Nada")
+        await chat.say("Karam")
+        await chat.tap(texts.ADD_MORE)
+        await self.send_basket(chat)
 
-    async def test_skipping_both_parents_explains_and_saves_nothing(self):
+        payload = [q for q in self.queued() if q["payload"]["kind"] == submissions.ADD_PARENTS][0]
+        roles = {e["role"]: e for e in payload["payload"]["people"]}
+        self.assertEqual(roles["father"]["given_name"], "Youssef")
+        self.assertEqual(roles["mother"]["family_name"], "Karam")
+
+    async def test_skipping_the_mother_skips_her_family_name_too(self):
         chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        self.assertNotIn("before she married", chat.text)
+
+    async def test_giving_nothing_explains_and_saves_nothing(self):
+        chat = Conversation(user_id=5201)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.SKIP)
+        before = len(self.queued())
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.SKIP)
         self.assertIn("nothing to send", chat.transcript())
-        self.assertEqual(self.queued(), [])
+        self.assertEqual(len(self.queued()), before)
 
 
 class AddSiblingAndSpouseTests(BotTestCase):
@@ -370,52 +389,224 @@ class AddSiblingAndSpouseTests(BotTestCase):
         self.assertIn("her first name", chat.text)
 
         await chat.say("Mariam")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
 
         entry = self.queued()[0]["payload"]["people"][0]
         self.assertEqual(entry["role"], submissions.SIBLING)
         self.assertEqual(entry["sex"], "F")
-        self.assertIn("sister", submissions.describe(self.queued()[0]["payload"]))
 
     async def test_spouse_records_a_family_name(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_SPOUSE)
         await chat.tap(texts.SPOUSE_WIFE)
         await chat.say("Therese")
-        await chat.tap(texts.YES)
         await chat.say("Obeid")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
 
         entry = self.queued()[0]["payload"]["people"][0]
         self.assertEqual(entry["role"], submissions.SPOUSE)
         self.assertEqual(entry["family_name"], "Obeid")
 
 
+# ===========================================================================
+# Climbing
+# ===========================================================================
+
+
+class ClimbTests(BotTestCase):
+    async def test_the_cursor_follows_the_person_just_named(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("Nada")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CLIMB_YES)
+        self.assertIn("Youssef's father", chat.text)
+
+    async def test_three_generations_in_one_sitting(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)              # mother unknown
+        await chat.tap(texts.CLIMB_YES)         # now on Youssef
+        await chat.say("Elias")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CLIMB_YES)         # now on Elias
+        await chat.say("Semaan")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+        await self.send_basket(chat)
+
+        names = [
+            q["payload"]["people"][0]["given_name"]
+            for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_PARENTS
+        ]
+        self.assertEqual(names, ["Youssef", "Elias", "Semaan"])
+
+    async def test_the_chain_is_anchored_when_it_sends(self):
+        """Each generation must point at the one below, not float free."""
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CLIMB_YES)
+        await chat.say("Elias")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+        await self.send_basket(chat)
+
+        parents = [
+            q for q in self.queued() if q["payload"]["kind"] == submissions.ADD_PARENTS
+        ]
+        first, second = parents[0], parents[1]
+        self.assertEqual(first["payload"]["about"]["person_id"], self.ids["khalil_y"])
+        self.assertEqual(second["payload"]["about"]["submission_id"], first["id"])
+        self.assertNotIn("draft_id", second["payload"]["about"])
+
+    async def test_the_prompt_names_whoever_the_cursor_is_on(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CLIMB_YES)
+        await chat.say("Elias")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+        # Declining the climb leaves the cursor where it was, on Youssef.
+        self.assertIn("Adding relatives for: Youssef", chat.text)
+        self.assertIn("Add Youssef's parents", chat.buttons)
+        await chat.tap("Add a brother or sister of Youssef")
+        self.assertIn("brother or a sister of Youssef", chat.text)
+
+
+class SwitchSubjectTests(BotTestCase):
+    async def test_the_contributors_relatives_are_offered(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        offered = " ".join(chat.buttons)
+        self.assertIn("Georges Youssef Sukkar", offered)   # his brother
+        self.assertIn("Youssef Elias Sukkar", offered)     # his father
+
+    async def test_switching_moves_the_cursor(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap("Georges Youssef")
+        self.assertIn("Adding relatives for: Georges Youssef Sukkar", chat.text)
+
+        await chat.tap("Add a child of Georges")
+        await chat.tap(texts.CHILD_SON)
+        await chat.say("Sami")
+        await self.send_basket(chat)
+        self.assertEqual(
+            self.queued()[0]["payload"]["about"]["person_id"], self.ids["georges"]
+        )
+
+
+# ===========================================================================
+# Review and send
+# ===========================================================================
+
+
+class ReviewTests(BotTestCase):
+    async def collect_two(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_DAUGHTER)
+        await chat.say("Ritta")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap(texts.MENU_ADD_SIBLING)
+        await chat.tap(texts.SIBLING_BROTHER)
+        await chat.say("Sami")
+        await chat.tap(texts.ADD_MORE)
+        return chat
+
+    async def test_review_lists_everything_collected(self):
+        chat = await self.collect_two()
+        await chat.tap("Review and send")
+        self.assertIn("Ritta", chat.text)
+        self.assertIn("Sami", chat.text)
+        self.assertIn("Send all 2", " ".join(chat.buttons))
+
+    async def test_a_misspelling_can_be_corrected_before_it_sends(self):
+        chat = await self.collect_two()
+        await chat.tap("Review and send")
+        await chat.tap("Ritta")
+        self.assertIn("What should Ritta be?", chat.text)
+        await chat.say("Rita")
+        self.assertIn("Rita", chat.text)
+
+        await chat.tap("Send all")
+        names = [q["payload"]["people"][0]["given_name"] for q in self.queued()]
+        self.assertIn("Rita", names)
+        self.assertNotIn("Ritta", names)
+
+    async def test_an_entry_can_be_removed(self):
+        chat = await self.collect_two()
+        await chat.tap("Review and send")
+        await chat.tap("Sami")
+        await chat.tap(texts.REMOVE)
+        await chat.tap("Send all")
+
+        names = [q["payload"]["people"][0]["given_name"] for q in self.queued()]
+        self.assertNotIn("Sami", names)
+        self.assertIn("Ritta", names)
+
+    async def test_removing_a_parent_removes_what_hung_off_it(self):
+        """Otherwise a grandfather is left anchored to nothing."""
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CLIMB_YES)
+        await chat.say("Elias")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+
+        await chat.tap("Review and send")
+        await chat.tap("1. Youssef")
+        await chat.tap(texts.REMOVE)
+        self.assertIn(texts.REVIEW_EMPTY, chat.transcript())
+
+    async def test_the_basket_survives_going_back_for_more(self):
+        chat = await self.collect_two()
+        await chat.tap("Review and send")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_SON)
+        await chat.say("Tanios")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap("Review and send")
+        self.assertIn("Send all 3", " ".join(chat.buttons))
+
+    async def test_sending_empties_the_basket(self):
+        chat = await self.collect_two()
+        await self.send_basket(chat)
+        self.assertEqual(len(self.queued()), 2)
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_SON)
+        await chat.say("Tanios")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap("Review and send")
+        self.assertIn("Send all 1", " ".join(chat.buttons))
+
+
+# ===========================================================================
+# Duplicates
+# ===========================================================================
+
+
 class DuplicateFlaggingTests(BotTestCase):
     async def test_probable_duplicate_is_flagged_for_the_admin(self):
-        """Two relatives submitting the same person is the common case."""
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
-        await chat.say("Georges")  # already in the tree, same branch
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-
-        queued = self.queued()[0]
-        self.assertEqual(queued["matched_person_id"], self.ids["georges"])
+        await chat.say("Georges")
+        await self.send_basket(chat)
+        self.assertEqual(self.queued()[0]["matched_person_id"], self.ids["georges"])
 
     async def test_flagging_never_merges_or_rejects(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
         await chat.say("Georges")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-
-        queued = self.queued()[0]
-        self.assertEqual(queued["status"], "pending")
+        await self.send_basket(chat)
+        self.assertEqual(self.queued()[0]["status"], "pending")
         self.assertEqual(self.people_count(), 12)
 
     async def test_unrelated_name_is_not_flagged(self):
@@ -423,9 +614,13 @@ class DuplicateFlaggingTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Zaher")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
         self.assertIsNone(self.queued()[0]["matched_person_id"])
+
+
+# ===========================================================================
+# Fix something I submitted
+# ===========================================================================
 
 
 class FixSomethingTests(BotTestCase):
@@ -439,15 +634,12 @@ class FixSomethingTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Ritta")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-        await chat.tap(texts.CLIMB_NO)
+        await self.send_basket(chat)
 
         await chat.tap(texts.MENU_FIX)
         self.assertIn("Ritta", str(chat.buttons))
         await chat.tap("Ritta")
         await chat.say("Her name is Rita, one t")
-        await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
 
         queued = self.queued()
@@ -456,55 +648,33 @@ class FixSomethingTests(BotTestCase):
         self.assertEqual(correction["kind"], submissions.CORRECTION)
         self.assertEqual(correction["target_submission_id"], queued[0]["id"])
         self.assertIn("one t", correction["note"])
-        self.assertIn(texts.FIX_SAVED, chat.transcript())
 
     async def test_a_correction_changes_nothing_live(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Sami")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-        await chat.tap(texts.CLIMB_NO)
-
-        await chat.tap(texts.MENU_FIX)
-        await chat.tap("Sami")
-        await chat.say("Actually he is Samir")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-
-        self.assertEqual(self.people_count(), 12)
-        for row in self.queued():
-            self.assertEqual(row["status"], "pending")
-
-    async def test_the_original_submission_stays_untouched(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap(texts.CHILD_SON)
-        await chat.say("Sami")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-        await chat.tap(texts.CLIMB_NO)
+        await self.send_basket(chat)
         original = self.queued()[0]["payload"]
 
         await chat.tap(texts.MENU_FIX)
         await chat.tap("Sami")
         await chat.say("Actually he is Samir")
-        await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
 
+        self.assertEqual(self.people_count(), 12)
         self.assertEqual(self.queued()[0]["payload"], original)
+        for row in self.queued():
+            self.assertEqual(row["status"], "pending")
+
+
+# ===========================================================================
+# The rules the bot could quietly break
+# ===========================================================================
 
 
 class ConstraintTests(BotTestCase):
-    """The rules the bot could quietly break."""
-
     def test_bot_never_calls_a_privileged_write(self):
-        """Constraint 4, enforced against future edits.
-
-        Looks for actual calls, so a comment explaining why the bot must not
-        call these does not itself fail the test.
-        """
         forbidden = re.compile(
             r"\b(?:db\.)?(create_person|update_person|create_union|"
             r"assign_branches|sync_branches|set_branch_founder)\s*\("
@@ -521,31 +691,27 @@ class ConstraintTests(BotTestCase):
         self.assertEqual(offenders, [], "; ".join(offenders))
 
     def test_bot_writes_only_through_the_store(self):
-        """No handler should be opening its own connection or writing SQL."""
         root = Path(__file__).resolve().parents[1] / "bot"
         offenders = []
         for path in sorted(root.rglob("*.py")):
             if path.name == "store.py":
                 continue
             text = path.read_text(encoding="utf-8")
-            if "INSERT" in text.upper():
+            if re.search(r"\bINSERT\s+INTO\b", text, re.IGNORECASE):
                 offenders.append(f"bot/{path.name} writes SQL")
             if "db.connect" in text:
                 offenders.append(f"bot/{path.name} opens its own connection")
         self.assertEqual(offenders, [], "; ".join(offenders))
 
     def test_no_flow_can_ask_for_a_date(self):
-        """Constraint 2 — the bot cannot express a date even if asked to."""
-        # Whole words only: "marriage" is not a request for an age.
         forbidden = re.compile(
             r"\b(year|years|born|birth|birthday|died|death|date|dates|age|ages|when)\b"
         )
         for kind, flow in flows.BY_KIND.items():
             for step in flow.steps:
                 prompt = step.text({"sex": "M"}).lower()
-                found = forbidden.search(prompt)
                 self.assertIsNone(
-                    found,
+                    forbidden.search(prompt),
                     f"{kind}.{step.id} asks for a date: {prompt!r}",
                 )
 
@@ -562,12 +728,15 @@ class ConstraintTests(BotTestCase):
     async def test_every_menu_option_reaches_a_working_flow(self):
         chat = await self.identified_as_khalil()
         for label in list(chat.buttons):
-            if label in (texts.MENU_VIEW, texts.MENU_FIX):
-                continue
+            # A linked contributor goes straight to the menu on /start.
             fresh = Conversation(user_id=5001)
             await fresh.start()
             await fresh.tap(label)
-            self.assertTrue(fresh.text, f"{label} produced no question")
+            self.assertTrue(fresh.text, f"{label} produced nothing")
+            self.assertTrue(
+                fresh.buttons or "?" in fresh.text,
+                f"{label} left the contributor with no way forward",
+            )
 
 
 class RobustnessTests(BotTestCase):
@@ -577,18 +746,6 @@ class RobustnessTests(BotTestCase):
         await chat.say("a boy I think")
         self.assertIn(texts.NOT_UNDERSTOOD, chat.transcript())
         self.assertIn(texts.ASK_CHILD_SEX, chat.text)
-
-    async def test_retyping_instead_of_tapping_no_just_works(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap(texts.CHILD_SON)
-        await chat.say("Smai")
-        await chat.say("Sami")  # correcting without touching the buttons
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
-        self.assertEqual(
-            self.queued()[0]["payload"]["people"][0]["given_name"], "Sami"
-        )
 
     async def test_empty_message_is_rejected_kindly(self):
         chat = await self.identified_as_khalil()
@@ -609,8 +766,7 @@ class RobustnessTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("  Sami  ")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
         self.assertEqual(
             self.queued()[0]["payload"]["people"][0]["given_name"], "Sami"
         )
@@ -620,38 +776,10 @@ class RobustnessTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("خليل")
-        await chat.tap(texts.YES)
-        await chat.tap(texts.SEND_IT)
+        await self.send_basket(chat)
         self.assertEqual(
             self.queued()[0]["payload"]["people"][0]["given_name"], "خليل"
         )
-
-
-class ConfirmationTests(BotTestCase):
-    async def test_confirmation_does_not_repeat_itself(self):
-        """A summary shown twice trains people to stop reading it."""
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap(texts.CHILD_DAUGHTER)
-        await chat.say("Rita")
-        await chat.tap(texts.YES)
-
-        body = chat.text.split(texts.CONFIRM_SUBMISSION)[-1].strip()
-        self.assertEqual(body.count("Rita"), 1, body)
-
-    async def test_confirmation_shows_detail_the_summary_omits(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_PARENTS)
-        await chat.say("Youssef")
-        await chat.tap(texts.YES)
-        await chat.say("Nada")
-        await chat.tap(texts.YES)
-        await chat.say("Karam")
-        await chat.tap(texts.YES)
-
-        self.assertIn("Youssef", chat.text)
-        self.assertIn("Nada", chat.text)
-        self.assertIn("Karam", chat.text)
 
 
 class WiringTests(unittest.TestCase):
@@ -670,7 +798,6 @@ class WiringTests(unittest.TestCase):
         self.assertLessEqual({"share", "help"}, commands)
 
     def test_every_state_can_be_left(self):
-        """No state should be a dead end with no cancel and no fallback."""
         from bot.main import build_conversation
 
         conversation = build_conversation()

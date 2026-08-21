@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import config
 import submissions
 from bot import texts
 
@@ -48,12 +49,19 @@ class Step:
     optional: bool = False
     #: Only ask this if the named earlier answer was given.
     only_if: str | None = None
+    #: ...and, when set, only if that answer equals this value.
+    only_if_value: Any = None
 
     def text(self, answers: dict[str, Any]) -> str:
         return self.prompt(answers) if callable(self.prompt) else self.prompt
 
     def applies(self, answers: dict[str, Any]) -> bool:
-        return self.only_if is None or answers.get(self.only_if) is not None
+        if self.only_if is None:
+            return True
+        answer = answers.get(self.only_if)
+        if self.only_if_value is not None:
+            return answer == self.only_if_value
+        return answer is not None
 
 
 @dataclass(frozen=True)
@@ -116,6 +124,14 @@ def next_step(steps: list[Step], answers: dict[str, Any], index: int) -> tuple[S
 # ---------------------------------------------------------------------------
 
 
+def family_name_from(answers: dict[str, Any]) -> str | None:
+    """Whichever spelling they picked, or typed when none of them fitted."""
+    chosen = answers.get("family")
+    if chosen == FAMILY_OTHER:
+        return answers.get("family_other")
+    return chosen
+
+
 def _build_identify(answers, submitted_by, about, **_):
     return submissions.build(
         submissions.IDENTIFY,
@@ -125,6 +141,7 @@ def _build_identify(answers, submitted_by, about, **_):
             submissions.person(
                 submissions.SELF,
                 answers["given"],
+                family_name=family_name_from(answers),
                 father_given_name=answers.get("father_given"),
             )
         ],
@@ -225,10 +242,28 @@ def _his_her(answers: dict[str, Any]) -> str:
     return texts.his_her(answers.get("sex"))
 
 
+FAMILY_OTHER = "__other__"
+
+
+def _family_choices() -> list[tuple[str, str]]:
+    """The known spellings, plus an escape hatch for one we have not seen."""
+    return [(variant, variant) for variant in config.FAMILY_NAME_VARIANTS] + [
+        (texts.FAMILY_OTHER, FAMILY_OTHER)
+    ]
+
+
 IDENTIFY = Flow(
     kind=submissions.IDENTIFY,
     steps=[
         Step("given", NAME, texts.ASK_SELF_GIVEN),
+        Step("family", CHOICE, texts.ASK_SELF_FAMILY, choices=_family_choices()),
+        Step(
+            "family_other",
+            TEXT,
+            texts.ASK_FAMILY_OTHER,
+            only_if="family",
+            only_if_value=FAMILY_OTHER,
+        ),
         Step(
             "father_given",
             NAME,

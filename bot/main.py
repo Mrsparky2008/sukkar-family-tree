@@ -60,6 +60,7 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
         entry_points=[CommandHandler("start", handlers.start)],
         states={
             handlers.MENU: [
+                CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 CallbackQueryHandler(handlers.on_menu, pattern=r"^menu:"),
             ],
             handlers.ASK: [
@@ -91,7 +92,18 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             ],
             handlers.CLIMB: [
                 CallbackQueryHandler(handlers.on_climb, pattern=r"^climb:"),
+                CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 cancel_button,
+            ],
+            handlers.REVIEW: [
+                CallbackQueryHandler(handlers.on_edit_pick, pattern=r"^edit:"),
+                CallbackQueryHandler(handlers.on_send_all, pattern=r"^sendall$"),
+                cancel_button,
+            ],
+            handlers.EDIT_VALUE: [
+                CallbackQueryHandler(handlers.on_edit_remove, pattern=r"^remove$"),
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_edit_value),
             ],
             handlers.IDENTITY_MATCH: [
                 CallbackQueryHandler(handlers.on_identity_choice, pattern=r"^who"),

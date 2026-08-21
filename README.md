@@ -166,6 +166,41 @@ instance — is left unassigned rather than guessed at.
 
 Details in `bot/README.md`.
 
+## The family name is asked, never assumed
+
+Arabic transliteration is not standardised, so the same family reached four
+countries spelled four ways — and that spelling is now on people's passports.
+Signup asks which one, as buttons, so it costs a tap:
+
+```
+And how do you spell your family name?
+   [ Sukkar ] [ Sukar ] [ Succar ] [ Soukkar ] [ Something else ]
+```
+
+Each person keeps their own spelling. `db.canonical_family_name()` folds all
+of them onto one form for matching, so a Succar in Sydney and a Soukkar in
+São Paulo still corroborate each other rather than fragmenting into separate
+families. The list lives in `config.FAMILY_NAME_VARIANTS`.
+
+## Nothing is confirmed one name at a time
+
+An earlier version read every answer back for a yes/no. It doubled the taps
+and made a conversation feel like a form. Answers now go straight through,
+and everything is checked once at the end, on a screen the contributor can
+actually read and edit:
+
+```
+Here's everything you've given me. Check the spelling — tap any line to change it.
+
+1. Kalim as father, Wadiha as mother of Steven Succar
+2. Semaan as father of Kalim
+   [ 1. Kalim ] [ 2. Semaan ] [ Send all 2 ] [ Add someone else ]
+```
+
+Tapping a line retypes or removes it. Nothing reaches the queue until they
+send, and removing a parent removes anything that hung off them, so no
+grandfather is left anchored to nothing.
+
 ## Adding relatives for anyone, not just yourself
 
 A contributor can only enter about six people if every question is about
