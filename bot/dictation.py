@@ -35,34 +35,34 @@ from bot import understand
 #: Words that announce whose relatives come next, and what they are. Order
 #: matters: longer phrases are matched first so "grandfather" does not get
 #: read as "father".
-ROLE_WORDS: list[tuple[str, str, str | None]] = [
-    # phrase, role, sex
-    ("parents", submissions.FATHER, None),      # expanded below into two
-    ("mother and father", submissions.FATHER, None),
-    ("father and mother", submissions.FATHER, None),
-    ("mum and dad", submissions.FATHER, None),
-    ("mom and dad", submissions.FATHER, None),
-    ("father", submissions.FATHER, "M"),
-    ("dad", submissions.FATHER, "M"),
-    ("baba", submissions.FATHER, "M"),
-    ("mother", submissions.MOTHER, "F"),
-    ("mum", submissions.MOTHER, "F"),
-    ("mom", submissions.MOTHER, "F"),
-    ("brothers", submissions.SIBLING, "M"),
-    ("brother", submissions.SIBLING, "M"),
-    ("sisters", submissions.SIBLING, "F"),
-    ("sister", submissions.SIBLING, "F"),
-    ("siblings", submissions.SIBLING, None),
-    ("sons", submissions.CHILD, "M"),
-    ("son", submissions.CHILD, "M"),
-    ("daughters", submissions.CHILD, "F"),
-    ("daughter", submissions.CHILD, "F"),
-    ("children", submissions.CHILD, None),
-    ("kids", submissions.CHILD, None),
-    ("child", submissions.CHILD, None),
-    ("wife", submissions.SPOUSE, "F"),
-    ("husband", submissions.SPOUSE, "M"),
-    ("spouse", submissions.SPOUSE, None),
+ROLE_WORDS: list[tuple[str, str, str | None, bool]] = [
+    # phrase, role, sex, plural
+    ("parents", submissions.FATHER, None, True),
+    ("mother and father", submissions.FATHER, None, False),
+    ("father and mother", submissions.FATHER, None, False),
+    ("mum and dad", submissions.FATHER, None, False),
+    ("mom and dad", submissions.FATHER, None, False),
+    ("father", submissions.FATHER, "M", False),
+    ("dad", submissions.FATHER, "M", False),
+    ("baba", submissions.FATHER, "M", False),
+    ("mother", submissions.MOTHER, "F", False),
+    ("mum", submissions.MOTHER, "F", False),
+    ("mom", submissions.MOTHER, "F", False),
+    ("brothers", submissions.SIBLING, "M", True),
+    ("brother", submissions.SIBLING, "M", False),
+    ("sisters", submissions.SIBLING, "F", True),
+    ("sister", submissions.SIBLING, "F", False),
+    ("siblings", submissions.SIBLING, None, True),
+    ("sons", submissions.CHILD, "M", True),
+    ("son", submissions.CHILD, "M", False),
+    ("daughters", submissions.CHILD, "F", True),
+    ("daughter", submissions.CHILD, "F", False),
+    ("children", submissions.CHILD, None, True),
+    ("kids", submissions.CHILD, None, True),
+    ("child", submissions.CHILD, None, False),
+    ("wife", submissions.SPOUSE, "F", False),
+    ("husband", submissions.SPOUSE, "M", False),
+    ("spouse", submissions.SPOUSE, None, False),
 ]
 
 #: Phrases meaning "this pair is a father and a mother", which is the only
@@ -86,7 +86,7 @@ DESCENT = re.compile(
 #: story. Both arrive in brackets and they are not the same thing.
 BRACKETED = re.compile(r"\(([^)]*)\)")
 
-#: Words that make a bracketed phrase a remark rather than a nickname.
+#: Words that make a bracketed phrase a remark rather than a also_known_as.
 SENTENCE_WORDS = {
     "he", "she", "they", "it", "was", "were", "is", "are", "became", "become",
     "died", "passed", "away", "born", "lives", "lived", "went", "married",
@@ -95,6 +95,14 @@ SENTENCE_WORDS = {
 
 MARRIAGE = re.compile(
     r"\b(?:married\s+to|married|wed\s+to|wife\s+of|husband\s+of)\b", re.IGNORECASE
+)
+
+#: "Khalil never married" is a fact about Khalil, not a marriage. Checked
+#: before MARRIAGE, which would otherwise read it as one.
+NEVER_MARRIED = re.compile(
+    r"^(?P<who>.{1,60}?)\s+(?:never|did\s*n[o']?t|didn't|not)\s+"
+    r"(?:get\s+)?marri(?:ed|age)?\b",
+    re.IGNORECASE,
 )
 
 #: Words that are never part of a name.
@@ -137,6 +145,13 @@ class Reading:
     #: daughter of...". Overrides whoever the bot was asking about.
     subject: str | None = None
     subject_sex: str | None = None
+    #: Facts about people already named — "Khalil never married". Not new
+    #: relatives; notes to attach to whoever they are about.
+    remarks: list[tuple[str | None, str]] = field(default_factory=list)
+    #: Other names for people already named — "Hanna (John) married to...".
+    #: Hanna is not a new relative here, but John is new information about him
+    #: and would otherwise fall on the floor.
+    aliases: list[tuple[str, str]] = field(default_factory=list)
     #: Remarks that could not be pinned to one person — "the other girls are
     #: single". Kept verbatim on the submission rather than guessed at, because
     #: attributing "the others" by rule gets it wrong and nobody notices.
@@ -158,8 +173,11 @@ class Mention:
     family_name: str | None = None
     sex: str | None = None
     note: str | None = None
-    nickname: str | None = None
+    also_known_as: str | None = None
     spouse_of: str | None = None
+    #: Who this person hangs off, when the line named somebody other than
+    #: whoever the bot was asking about.
+    about: str | None = None
     uncertain: list[str] = field(default_factory=list)
 
     def label(self) -> str:
@@ -168,7 +186,7 @@ class Mention:
             if self.family_name
             else self.given_name
         )
-        return f"{name} ({self.nickname})" if self.nickname else name
+        return f"{name} ({self.also_known_as})" if self.also_known_as else name
 
     def same_person_as(self, other: "Mention") -> bool:
         """Whether these are obviously the same name written twice."""
@@ -196,7 +214,9 @@ def looks_like_dictation(text: str) -> bool:
         return False
     lowered = cleaned.casefold()
 
-    if any(re.search(rf"\b{re.escape(word)}\b", lowered) for word, _, _ in ROLE_WORDS):
+    if any(
+        re.search(rf"\b{re.escape(word)}\b", lowered) for word, _, _, _ in ROLE_WORDS
+    ):
         return True
     if MARRIAGE.search(lowered):
         return True
@@ -228,8 +248,8 @@ def _is_subject(given: str, subject_name: str | None) -> bool:
 
 
 def _take_brackets(chunk: str) -> tuple[str, list[str], list[str]]:
-    """Pull bracketed text out, sorted into nicknames and remarks."""
-    nicknames: list[str] = []
+    """Pull bracketed text out, sorted into also_known_ass and remarks."""
+    also_known_ass: list[str] = []
     remarks: list[str] = []
 
     for inner in BRACKETED.findall(chunk):
@@ -243,9 +263,9 @@ def _take_brackets(chunk: str) -> tuple[str, list[str], list[str]]:
         if reads_like_a_sentence:
             remarks.append(content)
         else:
-            nicknames.append(content)
+            also_known_ass.append(content)
 
-    return BRACKETED.sub(" ", chunk), nicknames, remarks
+    return BRACKETED.sub(" ", chunk), also_known_ass, remarks
 
 
 def _split_run_on(chunk: str, family_names: set[str]) -> list[str]:
@@ -293,20 +313,51 @@ def _strip_notes(chunk: str) -> tuple[str, str | None]:
 class _Name:
     given: str
     family: str | None
-    nickname: str | None
+    also_known_as: str | None
     remarks: list[str]
+    maybe_two: bool = False
+
+
+def _titled(word: str) -> str:
+    """Capitalise as a name would be, leaving mixed case alone.
+
+    'saide' becomes 'Saide'; 'McKay' and 'AbouKhalil' are left as typed.
+    """
+    return word if any(c.isupper() for c in word[1:]) else word.capitalize()
+
+
+def _role_at(
+    lowered: str, start_from: int = 0
+) -> tuple[str, str | None, bool, bool, int, int] | None:
+    """The first role word at or after `start_from`.
+
+    Returns role, sex, whether it names a pair of parents, whether it was
+    plural, and where it sat.
+    """
+    best = None
+    for phrase, role, sex, plural in ROLE_WORDS:
+        match = re.search(rf"\b{re.escape(phrase)}\b", lowered[start_from:])
+        if match is None:
+            continue
+        start, end = match.start() + start_from, match.end() + start_from
+        if best is None or start < best[4]:
+            best = (role, sex, phrase in PAIR_WORDS, plural, start, end)
+    return best
 
 
 def _names_in(
     chunk: str,
     subject_name: str | None = None,
     family_names: set[str] | None = None,
+    plural: bool = False,
 ) -> list[_Name]:
     """Pull people out of a fragment like 'Dibeh Haddad, Hanna (John) Haddad'."""
     found: list[_Name] = []
+    had_separators = bool(re.search(r",|\band\b|&|/|;|\+", chunk, re.IGNORECASE))
+
     for piece in re.split(r",|\band\b|&|/|;|\+", chunk, flags=re.IGNORECASE):
         for run in _split_run_on(piece, family_names or set()):
-            run, nicknames, remarks = _take_brackets(run)
+            run, others, remarks = _take_brackets(run)
             words = [
                 word.strip(understand.EDGE_PUNCTUATION) for word in run.split()
             ]
@@ -321,33 +372,54 @@ def _names_in(
             ]
             if not words:
                 continue
+
+            # "kids are Rohnda Jason Ronnie Jocelyn" — a plural role, no commas,
+            # no surname anywhere. That is four children, not one child with a
+            # very long name.
+            if plural and not had_separators and len(words) > 2:
+                for word in words:
+                    found.append(
+                        _Name(
+                            given=_titled(word),
+                            family=None,
+                            also_known_as=None,
+                            remarks=remarks,
+                            maybe_two=False,
+                        )
+                    )
+                    remarks = []
+                continue
+
             found.append(
                 _Name(
                     given=_titled(words[0]),
                     family=_titled(" ".join(words[1:])) if len(words) > 1 else None,
-                    nickname=nicknames[0] if nicknames else None,
+                    also_known_as=others[0] if others else None,
                     remarks=remarks,
+                    # In a plural list where the others are single names, two
+                    # words is as likely to be a missing comma as a surname.
+                    maybe_two=plural and len(words) == 2,
                 )
             )
+            remarks = []
     return found
 
 
-def _titled(word: str) -> str:
-    """Capitalise as a name would be, leaving mixed case alone.
+def _first_name_in(
+    text: str, subject_name: str | None, family_names: set[str]
+) -> tuple[str, str | None] | None:
+    """The first person named in a fragment, and any other name they go by.
 
-    'saide' becomes 'Saide'; 'McKay' and 'AbouKhalil' are left as typed.
+    Returns (given name, also-known-as). Relationship words are stripped first
+    so "my mother Wadiha" answers Wadiha.
     """
-    return word if any(c.isupper() for c in word[1:]) else word.capitalize()
-
-
-def _role_at(lowered: str) -> tuple[str, str | None, bool, int, int] | None:
-    """The first role word in this text: role, sex, is_pair, start, end."""
-    best = None
-    for phrase, role, sex in ROLE_WORDS:
-        match = re.search(rf"\b{re.escape(phrase)}\b", lowered)
-        if match and (best is None or match.start() < best[3]):
-            best = (role, sex, phrase in PAIR_WORDS, match.start(), match.end())
-    return best
+    cleaned = text
+    for phrase, _role, _sex, _plural in ROLE_WORDS:
+        cleaned = re.sub(rf"\b{re.escape(phrase)}\b", " ", cleaned, flags=re.IGNORECASE)
+    people = _names_in(cleaned, subject_name, family_names)
+    if not people:
+        return None
+    return people[0].given, people[0].also_known_as
 
 
 def parse(
@@ -358,54 +430,127 @@ def parse(
     """Read a message into people. Never raises; returns an empty Reading."""
     mentions: list[Mention] = []
     loose_notes: list[str] = []
-    current_role = default_role
-    current_sex = None
-    pair_expected = False
+    remarks: list[tuple[str | None, str]] = []
 
     family_names = {
         variant.casefold() for variant in config.FAMILY_NAME_VARIANTS
     } | {config.FAMILY_NAME.casefold()}
-    subject_override = None
-    subject_sex = None
+
+    declared_subject: str | None = None
+    declared_sex: str | None = None
+    aliases: list[tuple[str, str]] = []
+    #: Who the current line's people hang off. None means whoever the bot was
+    #: already asking about.
+    about: str | None = None
+
+    current_role = default_role
+    current_sex: str | None = None
+    pair_expected = False
+    plural = False
+
+    def add(mention: Mention) -> None:
+        mention.about = about
+        if not any(mention.same_person_as(seen) for seen in mentions):
+            mentions.append(mention)
 
     for raw_line in re.split(r"[\n;]+", text):
         line = understand.tidy(raw_line)
         if not line:
             continue
 
+        # "Khalil never married" — a fact about a man already named,
+        # not a new relative. Recorded as a remark against him.
+        unmarried = NEVER_MARRIED.match(line)
+        if unmarried is not None:
+            named = _first_name_in(unmarried.group("who"), subject_name, family_names)
+            if named:
+                who, also = named
+                about = who
+                if also:
+                    aliases.append((who, also))
+                remarks.append((who, "never married"))
+                continue
+
         # "Wadiha is the daughter of Najib and Saide" names its own subject.
         descent = DESCENT.match(line)
         if descent is not None:
-            named = understand.tidy(descent.group("who"))
-            # "my mother Wadiha is the daughter of..." — the relationship word
-            # tells us how the speaker knows her, not what she is called.
-            for phrase, _role, _sex in ROLE_WORDS:
-                named = re.sub(
-                    rf"\b{re.escape(phrase)}\b", " ", named, flags=re.IGNORECASE
-                )
+            named = descent.group("who")
             what = descent.group("what").casefold()
-            people = _names_in(named, None, family_names)
-            if people:
-                subject_override = people[0].given
-                subject_name = subject_override
-                subject_sex = {"daughter": "F", "son": "M"}.get(what)
+            resolved = _first_name_in(named, None, family_names)
+            if resolved:
+                who, also = resolved
+                if also:
+                    aliases.append((who, also))
+                declared_subject = declared_subject or who
+                declared_sex = {"daughter": "F", "son": "M"}.get(what) or declared_sex
+                subject_name = who
+                about = None if who == declared_subject else who
             if what in ("wife", "husband"):
-                current_role, current_sex, pair_expected = (
+                current_role, current_sex, pair_expected, plural = (
                     submissions.SPOUSE,
                     "M" if what == "wife" else "F",
                     False,
+                    False,
                 )
             else:
-                current_role, current_sex, pair_expected = (
+                current_role, current_sex, pair_expected, plural = (
                     submissions.FATHER,
                     None,
+                    True,
                     True,
                 )
             line = descent.group("parents")
 
+        # "Hanna (John) married to Therese Taouk kids are A B C"
+        # "Hanna married to Therese" names a new subject. "Dibeh, Sonia and
+        # Rima married to Jamil" is a list carrying on from an earlier role
+        # word, and only the last of them married anyone — so the deciding
+        # question is whether the left side names exactly one person.
+        marriage_names_a_subject = False
+        if MARRIAGE.search(line):
+            before = MARRIAGE.split(line, maxsplit=1)[0]
+            marriage_names_a_subject = (
+                _role_at(before.casefold()) is None
+                and len(_names_in(before, subject_name, family_names)) == 1
+            )
+
+        if marriage_names_a_subject:
+            left, right = MARRIAGE.split(line, maxsplit=1)[:2]
+
+            resolved = _first_name_in(left, subject_name, family_names)
+            if resolved:
+                about, also = resolved
+                if also:
+                    aliases.append((about, also))
+
+            # The spouse's name ends where the next relationship word starts.
+            following = _role_at(right.casefold())
+            if following is not None:
+                spouse_text, line = right[: following[4]], right[following[4] :]
+            else:
+                spouse_text, line = right, ""
+
+            spouse_text, spouse_note = _strip_notes(spouse_text)
+            if spouse_note:
+                loose_notes.append(spouse_note)
+            for person in _names_in(spouse_text, subject_name, family_names):
+                add(
+                    Mention(
+                        role=submissions.SPOUSE,
+                        given_name=person.given,
+                        family_name=person.family,
+                        also_known_as=person.also_known_as,
+                        spouse_of=about,
+                        note="; ".join(person.remarks) or None,
+                    )
+                )
+
+            if not understand.tidy(line):
+                continue
+
         found = _role_at(line.casefold())
         if found is not None:
-            current_role, current_sex, pair_expected, start, end = found
+            current_role, current_sex, pair_expected, plural, start, end = found
             remainder = (line[:start] + " " + line[end:]).strip(" :,-—")
         else:
             remainder = line
@@ -413,29 +558,25 @@ def parse(
         if current_role is None:
             continue
 
-        spouse_names: list[_Name] = []
-        spouse_note = None
+        inline_spouses: list[_Name] = []
         if MARRIAGE.search(remainder):
-            left, right = MARRIAGE.split(remainder, maxsplit=1)[0], MARRIAGE.split(
-                remainder, maxsplit=1
-            )[1]
+            left, right = MARRIAGE.split(remainder, maxsplit=1)[:2]
             remainder = left
             right, spouse_note = _strip_notes(right)
-            spouse_names = _names_in(right, subject_name, family_names)
+            if spouse_note:
+                loose_notes.append(spouse_note)
+            inline_spouses = _names_in(right, subject_name, family_names)
 
         remainder, note = _strip_notes(remainder)
-        if spouse_note:
-            loose_notes.append(spouse_note)
-        people = _names_in(remainder, subject_name, family_names)
+        people = _names_in(remainder, subject_name, family_names, plural=plural)
 
         if note and len(people) != 1:
             loose_notes.append(note)
             note = None
 
         for index, person in enumerate(people):
-            sex = current_sex
+            role, sex = current_role, current_sex
             uncertain = []
-            role = current_role
             if pair_expected:
                 role = submissions.FATHER if index == 0 else submissions.MOTHER
                 sex = "M" if index == 0 else "F"
@@ -443,41 +584,46 @@ def parse(
                     "which of the two parents is the father, from the order "
                     "you listed them"
                 )
-            mention = Mention(
-                role=role,
-                given_name=person.given,
-                family_name=person.family,
-                sex=sex,
-                nickname=person.nickname,
-                note="; ".join(person.remarks) or note,
-                uncertain=uncertain,
-            )
-            if not any(mention.same_person_as(seen) for seen in mentions):
-                mentions.append(mention)
-
-        if spouse_names and mentions:
-            partner_of = mentions[-1].label()
-            partner_sex = mentions[-1].sex
-            for person in spouse_names:
-                mention = Mention(
-                    role=submissions.SPOUSE,
+            if person.maybe_two:
+                uncertain.append(
+                    f"whether {person.given} {person.family} is one person or two"
+                )
+            add(
+                Mention(
+                    role=role,
                     given_name=person.given,
                     family_name=person.family,
-                    sex=_opposite(partner_sex),
-                    nickname=person.nickname,
-                    spouse_of=partner_of,
-                    uncertain=["whether a husband or a wife was meant"]
-                    if _opposite(partner_sex)
-                    else [],
+                    sex=sex,
+                    also_known_as=person.also_known_as,
+                    note="; ".join(person.remarks) or note,
+                    uncertain=uncertain,
                 )
-                if not any(mention.same_person_as(seen) for seen in mentions):
-                    mentions.append(mention)
+            )
+
+        if inline_spouses and mentions:
+            partner = mentions[-1]
+            for person in inline_spouses:
+                add(
+                    Mention(
+                        role=submissions.SPOUSE,
+                        given_name=person.given,
+                        family_name=person.family,
+                        sex=_opposite(partner.sex),
+                        also_known_as=person.also_known_as,
+                        spouse_of=partner.label(),
+                        uncertain=["whether a husband or a wife was meant"]
+                        if _opposite(partner.sex)
+                        else [],
+                    )
+                )
 
     return Reading(
         people=_resolve_titles(mentions),
         notes=[n for n in loose_notes if n],
-        subject=subject_override,
-        subject_sex=subject_sex,
+        remarks=remarks,
+        aliases=aliases,
+        subject=declared_subject,
+        subject_sex=declared_sex,
     )
 
 
@@ -491,7 +637,7 @@ def _resolve_titles(mentions: list[Mention]) -> list[Mention]:
 
         title, name = mention.given_name, mention.family_name
         if not name:
-            continue  # a bare title names nobody
+            continue
 
         existing = next(
             (m for m in kept if m.given_name.casefold() == name.casefold()), None
@@ -501,7 +647,6 @@ def _resolve_titles(mentions: list[Mention]) -> list[Mention]:
             existing.note = f"{existing.note}; {remark}" if existing.note else remark
             continue
 
-        # A title in front of somebody we have not met: keep the person.
         mention.given_name, mention.family_name = name, None
         mention.note = f"called {title} {name}"
         kept.append(mention)

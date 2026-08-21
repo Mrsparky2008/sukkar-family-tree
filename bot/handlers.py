@@ -744,6 +744,44 @@ def _subject_name_or_none(context: ContextTypes.DEFAULT_TYPE) -> str | None:
     return cursor["label"] if cursor else None
 
 
+def _join(names: list[str]) -> str:
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _find_in_basket(
+    context: ContextTypes.DEFAULT_TYPE, name: str
+) -> dict[str, Any] | None:
+    target = name.casefold()
+    for payload in _basket(context):
+        for entry in payload.get("people") or []:
+            if entry.get("given_name", "").casefold() == target:
+                return entry
+    return None
+
+
+def _note_in_basket(
+    context: ContextTypes.DEFAULT_TYPE, name: str, remark: str
+) -> bool:
+    """Attach a fact to somebody still in the basket. True if it landed."""
+    entry = _find_in_basket(context, name)
+    if entry is None:
+        return False
+    entry["notes"] = f"{entry['notes']}; {remark}" if entry.get("notes") else remark
+    return True
+
+
+def _alias_in_basket(
+    context: ContextTypes.DEFAULT_TYPE, name: str, alias: str
+) -> bool:
+    entry = _find_in_basket(context, name)
+    if entry is None or entry.get("also_known_as"):
+        return False
+    entry["also_known_as"] = alias
+    return True
+
+
 async def _resolve_named_subject(
     update: Update, context: ContextTypes.DEFAULT_TYPE, name: str
 ) -> dict[str, Any] | None:
@@ -802,6 +840,34 @@ async def _absorb_dictation(
         _set_cursor(context, found)
         lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
 
+    # Lines can name people other than whoever the bot was asking about:
+    # "Hanna married Therese, kids are ...". Those hang off Hanna.
+    anchors: dict[str, dict[str, Any] | None] = {}
+    for name in dict.fromkeys(m.about for m in reading.people if m.about):
+        anchors[name] = await _resolve_named_subject(update, context, name)
+
+    unplaced = sorted(name for name, found in anchors.items() if found is None)
+    if unplaced:
+        lead_extra += texts.DICTATED_UNKNOWN_PEOPLE.format(
+            names=_join(unplaced)
+        )
+    placed = sorted(name for name, found in anchors.items() if found is not None)
+    if placed:
+        lead_extra += "\n\n" + texts.DICTATED_ABOUT_OTHERS.format(
+            names=_join(placed)
+        )
+
+    # Facts and other names for people already recorded — "Khalil never
+    # married", "Hanna (John)". Not new relatives; new information about
+    # existing ones, which would otherwise fall on the floor.
+    for name, remark in reading.remarks:
+        if _note_in_basket(context, name, remark):
+            lead_extra += "\n\n" + texts.DICTATED_REMARK.format(
+                name=name, remark=remark
+            )
+    for name, alias in reading.aliases:
+        _alias_in_basket(context, name, alias)
+
     about = await _subject_of(update, context)
     submitted_by = submissions.submitter(
         user_id, person_id=who["person_id"], label=who["label"]
@@ -822,7 +888,7 @@ async def _absorb_dictation(
             mention.given_name,
             sex=mention.sex,
             family_name=mention.family_name,
-            nickname=mention.nickname,
+            also_known_as=mention.also_known_as,
             notes=mention.note,
         )
 
@@ -846,12 +912,36 @@ async def _absorb_dictation(
 
         for mention in others:
             if mention.role == submissions.SPOUSE and mention.spouse_of:
-                # Their husband hangs off them, not off whoever we started from.
+                # A wife hangs off the man she married, not off whoever we
+                # started from. He may be in this batch, or already recorded
+                # from an earlier one — dropping her when it is the latter was
+                # losing whole marriages silently.
                 anchor = drafts_by_label.get(mention.spouse_of)
-                if anchor is None:
+                if anchor is not None:
+                    subject = submissions.subject(label=mention.spouse_of)
+                    subject["draft_id"] = anchor
+                elif anchors.get(mention.about):
+                    found = anchors[mention.about]
+                    subject = submissions.subject(
+                        person_id=found["person_id"],
+                        submission_id=found["submission_id"],
+                        label=found["label"],
+                    )
+                    if found.get("draft_id"):
+                        subject["draft_id"] = found["draft_id"]
+                else:
                     continue
-                subject = submissions.subject(label=mention.spouse_of)
-                subject["draft_id"] = anchor
+            elif mention.about and anchors.get(mention.about):
+                found = anchors[mention.about]
+                subject = submissions.subject(
+                    person_id=found["person_id"],
+                    submission_id=found["submission_id"],
+                    label=found["label"],
+                )
+                if found.get("draft_id"):
+                    subject["draft_id"] = found["draft_id"]
+            elif mention.about:
+                continue  # nobody to hang it off; already reported above
             else:
                 subject = dict(about)
 

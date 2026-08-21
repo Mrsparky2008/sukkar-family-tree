@@ -219,6 +219,15 @@ DICTATED_UNSURE_ONE = "\n\nOne thing I guessed at: {reasons}. Worth a look."
 
 DICTATED_SUBJECT = "These are {name}'s relatives, so that's who I've put them under."
 
+DICTATED_ABOUT_OTHERS = "Some of these belong to {names} rather than to you."
+
+DICTATED_UNKNOWN_PEOPLE = (
+    "\n\nI couldn't place {names} — nobody by that name is in the tree or in "
+    "your list yet. Add them first and send this again."
+)
+
+DICTATED_REMARK = "Noted about {name}: {remark}."
+
 DICTATED_SUBJECT_UNKNOWN = (
     "You've told me about {name}'s family, but I don't know who {name} is yet.\n\n"
     "Add {name} first — then tell me this again and it'll slot straight in."

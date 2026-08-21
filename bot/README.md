@@ -93,6 +93,21 @@ they start typing.
 | `Clemence Haddad, sister clemence` | one woman, noted as also called Sister Clemence |
 | `Khalil Haddad Hanna Haddad` | two men — the repeated surname is the missing comma |
 | `the other girls are single` | kept loose; it names nobody in particular |
+| `Khalil never married` | a fact about Khalil, not a new relative |
+| `Hanna (John) married to Therese` | Therese is Hanna's wife — Hanna is already recorded |
+| `Kids are Rohnda Jason Ronnie Jocelyn` | four children. A plural role with no commas is a list |
+| `his son is Khalil Abou Haddad` | one man. A singular role keeps a long name whole |
+| `kids are Lena Centia, Maria, Sarah` | Lena Centia flagged: one person or two? |
+
+`(John)` is not a pet name — it is the English form Hanna took at migration,
+and it is what every official form in the new country uses. It is stored as
+`also_known_as`, and when it belongs to somebody already recorded it is
+attached to them rather than thrown away.
+
+A line can be about somebody other than whoever the bot was asking about.
+"Hanna married Therese / kids are..." hangs the wife and the children off
+Hanna, looked up in the tree and in the contributor's own basket. Anyone who
+cannot be placed is named in the reply rather than silently dropped.
 
 A message naming its own subject overrides whoever the bot was asking about,
 and that person is looked up in the tree *and* in the contributor's own

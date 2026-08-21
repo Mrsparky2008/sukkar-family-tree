@@ -22,7 +22,7 @@ EDGE_PUNCTUATION = " \t\r\n.,;:!?\"'`´’‘“”()[]{}<>«»…"
 
 #: What `tidy` strips from a whole message. Brackets are NOT in here: a
 #: message ending "...Youssef (Joe)" would lose its closing bracket, and the
-#: nickname would silently become part of the surname.
+#: other-name would silently become part of the surname.
 _MESSAGE_EDGES = " \t\r\n.,;:!?\"'`´’‘“”<>«»…"
 
 _AFFIRMATIVE = {

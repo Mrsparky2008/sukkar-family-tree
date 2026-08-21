@@ -207,13 +207,13 @@ class NicknamesAndTitlesTests(unittest.TestCase):
     def test_a_bracketed_name_is_a_nickname(self):
         reading = dictation.parse("his brothers are Hanna (John) and Youssef (Joe)")
         self.assertEqual(
-            [(m.given_name, m.nickname) for m in reading.people],
+            [(m.given_name, m.also_known_as) for m in reading.people],
             [("Hanna", "John"), ("Youssef", "Joe")],
         )
 
     def test_a_bracketed_sentence_is_a_remark(self):
         reading = dictation.parse("his sister is Clemence (she became a nun)")
-        self.assertIsNone(reading.people[0].nickname)
+        self.assertIsNone(reading.people[0].also_known_as)
         self.assertEqual(reading.people[0].note, "she became a nun")
 
     def test_a_nickname_lands_on_the_right_person(self):
@@ -222,7 +222,7 @@ class NicknamesAndTitlesTests(unittest.TestCase):
             "his brothers are Khalil Haddad Hanna (John) Haddad",
             subject_name=None,
         )
-        by_name = {m.given_name: m.nickname for m in reading.people}
+        by_name = {m.given_name: m.also_known_as for m in reading.people}
         self.assertIsNone(by_name.get("Khalil"))
         self.assertEqual(by_name.get("Hanna"), "John")
 
@@ -246,3 +246,63 @@ class NicknamesAndTitlesTests(unittest.TestCase):
     def test_an_ordinary_two_part_name_is_not_split(self):
         reading = dictation.parse("his brother is Khalil Abou Haddad")
         self.assertEqual(len(reading.people), 1)
+
+
+class RealisticInputTests(unittest.TestCase):
+    """The shapes people actually type, with no commas and no patience."""
+
+    MESSAGE = (
+        "Khalil Haddad never married\n"
+        "Hanna (John) Haddad married to Therese Taouk\n"
+        "Kids are Rohnda Jason Ronnie Jocelyn\n"
+        "Youssef (joe) Haddad married to Wafaq Rahme "
+        "kids are Lena Centia, Maria, Sarah and Josephine"
+    )
+
+    def setUp(self):
+        self.reading = dictation.parse(self.MESSAGE, subject_name="Wadiha")
+
+    def test_never_married_is_a_fact_not_a_new_relative(self):
+        self.assertEqual(self.reading.remarks, [("Khalil", "never married")])
+        self.assertNotIn("Khalil", [m.given_name for m in self.reading.people])
+
+    def test_a_line_can_be_about_someone_other_than_the_subject(self):
+        children = [m for m in self.reading.people if m.role == S.CHILD]
+        self.assertEqual(
+            {m.about for m in children}, {"Hanna", "Youssef"}
+        )
+
+    def test_a_run_of_names_with_no_commas_is_several_children(self):
+        hanna_kids = [
+            m.given_name
+            for m in self.reading.people
+            if m.role == S.CHILD and m.about == "Hanna"
+        ]
+        self.assertEqual(hanna_kids, ["Rohnda", "Jason", "Ronnie", "Jocelyn"])
+
+    def test_a_spouse_and_children_on_one_line_both_land(self):
+        for name in ("Therese", "Wafaq"):
+            spouse = [m for m in self.reading.people if m.given_name == name]
+            self.assertEqual(len(spouse), 1, name)
+            self.assertEqual(spouse[0].role, S.SPOUSE)
+
+    def test_an_ambiguous_pair_of_names_is_flagged_not_guessed(self):
+        lena = [m for m in self.reading.people if m.given_name == "Lena"][0]
+        self.assertTrue(lena.uncertain)
+        self.assertIn("one person or two", lena.uncertain[0])
+
+    def test_the_english_name_of_an_existing_relative_is_kept(self):
+        """(John) belongs to a man already recorded, not to a new one."""
+        self.assertEqual(
+            dict(self.reading.aliases), {"Hanna": "John", "Youssef": "joe"}
+        )
+
+    def test_nobody_is_invented_from_the_relationship_words(self):
+        names = {m.given_name for m in self.reading.people}
+        for word in ("Kids", "Married", "Never", "Are"):
+            self.assertNotIn(word, names)
+
+    def test_a_singular_role_keeps_a_three_part_name_whole(self):
+        reading = dictation.parse("his son is Khalil Abou Haddad")
+        self.assertEqual(len(reading.people), 1)
+        self.assertEqual(reading.people[0].label(), "Khalil Abou Haddad")
