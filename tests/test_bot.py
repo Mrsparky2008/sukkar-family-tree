@@ -212,6 +212,7 @@ class MenuTests(BotTestCase):
                 texts.MENU_ADD_SIBLING,
                 texts.MENU_ADD_SPOUSE,
                 texts.MENU_ADD_CHILD,
+                texts.MENU_SWITCH,
                 texts.MENU_FIX,
                 texts.MENU_VIEW,
             },
@@ -286,13 +287,27 @@ class AddChildTests(BotTestCase):
         self.assertIn(texts.ASK_CHILD_SEX, chat.text)
         self.assertEqual(self.queued(), [])
 
-    async def test_returns_to_the_menu_afterwards(self):
+    async def test_offers_to_keep_going_after_a_save(self):
+        """The climb: a save should suggest the next step, not a dead menu."""
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
         await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
+
+        self.assertIn(texts.SAVED, chat.transcript())
+        self.assertIn("Rita", chat.text)
+        self.assertIn(texts.CLIMB_YES, chat.buttons)
+
+    async def test_declining_the_climb_returns_to_the_menu(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_DAUGHTER)
+        await chat.say("Rita")
+        await chat.tap(texts.YES)
+        await chat.tap(texts.SEND_IT)
+        await chat.tap(texts.CLIMB_NO)
         self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
 
 
@@ -426,6 +441,7 @@ class FixSomethingTests(BotTestCase):
         await chat.say("Ritta")
         await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
+        await chat.tap(texts.CLIMB_NO)
 
         await chat.tap(texts.MENU_FIX)
         self.assertIn("Ritta", str(chat.buttons))
@@ -449,6 +465,7 @@ class FixSomethingTests(BotTestCase):
         await chat.say("Sami")
         await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
+        await chat.tap(texts.CLIMB_NO)
 
         await chat.tap(texts.MENU_FIX)
         await chat.tap("Sami")
@@ -467,6 +484,7 @@ class FixSomethingTests(BotTestCase):
         await chat.say("Sami")
         await chat.tap(texts.YES)
         await chat.tap(texts.SEND_IT)
+        await chat.tap(texts.CLIMB_NO)
         original = self.queued()[0]["payload"]
 
         await chat.tap(texts.MENU_FIX)

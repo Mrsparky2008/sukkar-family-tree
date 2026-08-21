@@ -160,21 +160,28 @@ def _queue(
     matched_person_id = None
     best = None
     entry = submissions.primary_person(payload)
+    about = payload.get("about") or {}
     if entry is not None:
-        # The spec's duplicate rule: fuzzy match on given name plus the
-        # father's given name, within the same branch. Two brothers submitting
-        # the same third brother is the common case, and their agreement is a
-        # confidence signal for whoever reviews it — not grounds to merge.
-        matches = db.find_probable_matches(
+        # Two brothers submitting the same third brother is the common case.
+        # Corroboration weighs shared relatives, not just spelling, because
+        # half the men in a branch answer to the same given name.
+        matches = db.corroborate(
             conn,
             entry["given_name"],
-            entry.get("father_given_name"),
+            role=entry.get("role"),
+            subject_person_id=about.get("person_id"),
+            subject_submission_id=about.get("submission_id"),
+            father_given_name=entry.get("father_given_name"),
             branch_id=branch_id,
         )
         if matches:
-            row, score = matches[0]
-            matched_person_id = row["id"]
-            best = {"label": db.row_display_name(row), "score": round(score, 3)}
+            best = matches[0]
+            # Only a real person can be linked; a match against another
+            # pending claim is evidence for the admin, not a foreign key.
+            for match in matches:
+                if match["person_id"] is not None:
+                    matched_person_id = match["person_id"]
+                    break
 
     submission_id = db.add_submission(
         conn, telegram_user_id, payload, matched_person_id=matched_person_id
@@ -185,6 +192,93 @@ def _queue(
 async def queue(telegram_user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """Put a submission in the review queue. Nothing else reaches the family data."""
     return await _run(_queue, telegram_user_id, payload)
+
+
+def _subject_candidates(
+    conn: sqlite3.Connection, telegram_user_id: int, limit: int = 20
+) -> list[dict[str, Any]]:
+    """Everyone this contributor could reasonably be asked about.
+
+    Themselves, their immediate relatives, and everyone they have already
+    named — including people still sitting in the queue, because a contributor
+    should be able to add their grandfather straight after adding their father,
+    without waiting days for an admin.
+    """
+    candidates: list[dict[str, Any]] = []
+    seen_people: set[int] = set()
+    seen_submissions: set[int] = set()
+
+    def add_person(row, note=None):
+        if row is None or row["id"] in seen_people:
+            return
+        seen_people.add(row["id"])
+        candidates.append(
+            {
+                "person_id": row["id"],
+                "submission_id": None,
+                "label": db.row_display_name(row),
+                "note": note,
+            }
+        )
+
+    contributor = db.get_contributor(conn, telegram_user_id)
+    own_id = contributor["linked_person_id"] if contributor else None
+
+    if own_id is not None:
+        add_person(db.get_person(conn, own_id), note="you")
+        for row in db.get_parents(conn, own_id):
+            add_person(row)
+        for row in db.get_siblings(conn, own_id):
+            add_person(row)
+        for row in db.get_partners(conn, own_id):
+            add_person(row)
+        for row in db.get_children(conn, own_id):
+            add_person(row)
+
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=50):
+        payload = db.submission_payload(row)
+        if payload.get("kind") == submissions.CORRECTION:
+            continue
+        if row["resulting_person_id"]:
+            add_person(db.get_person(conn, row["resulting_person_id"]))
+            continue
+        if row["status"] != "pending" or row["id"] in seen_submissions:
+            continue
+        seen_submissions.add(row["id"])
+        for entry in payload.get("people") or []:
+            candidates.append(
+                {
+                    "person_id": None,
+                    "submission_id": row["id"],
+                    "label": submissions.person_label(entry),
+                    "note": "waiting for review",
+                }
+            )
+
+    return candidates[:limit]
+
+
+async def subject_candidates(telegram_user_id: int) -> list[dict[str, Any]]:
+    return await _run(_subject_candidates, telegram_user_id)
+
+
+def _corroboration(
+    conn: sqlite3.Connection,
+    given_name: str,
+    role: str | None,
+    subject_person_id: int | None,
+    subject_submission_id: int | None,
+    telegram_user_id: int,
+) -> list[dict[str, Any]]:
+    contributor = db.get_contributor(conn, telegram_user_id)
+    return db.corroborate(
+        conn,
+        given_name,
+        role=role,
+        subject_person_id=subject_person_id,
+        subject_submission_id=subject_submission_id,
+        branch_id=contributor["branch_id"] if contributor else None,
+    )
 
 
 def _recent_submissions(

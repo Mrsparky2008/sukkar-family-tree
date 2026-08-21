@@ -29,6 +29,22 @@ import config
 
 SCHEMA_PATH = config.BASE_DIR / "schema.sql"
 
+#: Used when a caller does not pass an explicit threshold.
+FUZZY_FALLBACK = config.FUZZY_MATCH_THRESHOLD
+
+
+def submission_person_label(entry: dict[str, Any]) -> str:
+    """A person inside a pending payload, as text.
+
+    Local rather than imported from `submissions`, because that module reads
+    payloads and this one stores them; importing upward would make the two
+    circular.
+    """
+    name = entry.get("given_name", "?")
+    if entry.get("family_name"):
+        name = f"{name} {entry['family_name']}"
+    return name
+
 
 # ===========================================================================
 # Connection
@@ -753,6 +769,177 @@ def find_probable_matches(
 
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored
+
+
+# ===========================================================================
+# Corroboration
+# ===========================================================================
+#
+# Name similarity alone is weak: half the men in a branch are called Khalil.
+# What actually identifies someone is who they are attached to. Two people
+# independently describing "Georges, brother of Khalil son of Youssef" have
+# agreed on a relative, and that is far stronger evidence than a matching
+# spelling.
+#
+# This produces evidence for an admin to look at. It never merges anything.
+# ===========================================================================
+
+
+def _relatives_of(conn: sqlite3.Connection, person_id: int) -> dict[str, Any]:
+    """The facts about a person that a second submitter could corroborate."""
+    row = conn.execute(
+        "SELECT id, father_id, mother_id FROM people WHERE id = ?", (person_id,)
+    ).fetchone()
+    if row is None:
+        return {}
+    return {
+        "father_id": row["father_id"],
+        "mother_id": row["mother_id"],
+        "partner_ids": {p["id"] for p in get_partners(conn, person_id)},
+        "child_ids": {c["id"] for c in get_children(conn, person_id)},
+    }
+
+
+def _relational_reasons(
+    conn: sqlite3.Connection,
+    candidate: sqlite3.Row,
+    role: str,
+    subject_id: int,
+    subject: dict[str, Any],
+) -> list[str]:
+    """Why this candidate might already be the person being described."""
+    reasons: list[str] = []
+
+    if role == "sibling":
+        if subject["father_id"] and candidate["father_id"] == subject["father_id"]:
+            reasons.append("same father")
+        if subject["mother_id"] and candidate["mother_id"] == subject["mother_id"]:
+            reasons.append("same mother")
+    elif role == "child":
+        if candidate["father_id"] == subject_id or candidate["mother_id"] == subject_id:
+            reasons.append("already recorded as their child")
+    elif role == "father":
+        if subject["father_id"] == candidate["id"]:
+            reasons.append("already recorded as their father")
+        elif candidate["id"] in subject["child_ids"]:
+            reasons.append("already has this person as a child")
+    elif role == "mother":
+        if subject["mother_id"] == candidate["id"]:
+            reasons.append("already recorded as their mother")
+    elif role == "spouse":
+        if candidate["id"] in subject["partner_ids"]:
+            reasons.append("already recorded as their spouse")
+
+    return reasons
+
+
+def corroborate(
+    conn: sqlite3.Connection,
+    given_name: str,
+    role: str | None = None,
+    subject_person_id: int | None = None,
+    subject_submission_id: int | None = None,
+    father_given_name: str | None = None,
+    branch_id: int | None = None,
+    exclude_submission_id: int | None = None,
+    threshold: float | None = None,
+) -> list[dict[str, Any]]:
+    """Everyone this claim might already be, with the evidence, best first.
+
+    Searches both directions the same person can already exist:
+
+      * `people` — someone an admin has already approved.
+      * `submissions` — someone else's pending claim. This is where two
+        brothers submitting the same third brother actually collide, and it
+        happens before either is approved, so matching only against approved
+        people would miss the common case entirely.
+    """
+    cutoff = FUZZY_FALLBACK if threshold is None else threshold
+    subject = _relatives_of(conn, subject_person_id) if subject_person_id else {}
+    results: list[dict[str, Any]] = []
+
+    # --- against people already in the tree -------------------------------
+    sql = PERSON_SELECT
+    params: tuple[Any, ...] = ()
+    if branch_id is not None:
+        sql += " WHERE p.branch_id = ?"
+        params = (branch_id,)
+
+    for row in conn.execute(sql, params):
+        if row["id"] == subject_person_id:
+            # The person we are adding relatives for cannot be their own
+            # sibling, parent, or child.
+            continue
+        score = name_similarity(given_name, row["given_name"])
+        reasons: list[str] = []
+
+        if father_given_name and row["father_given_name"]:
+            if name_similarity(father_given_name, row["father_given_name"]) >= 0.85:
+                reasons.append(f"father also given as {row['father_given_name']}")
+
+        if subject and role:
+            reasons.extend(
+                _relational_reasons(conn, row, role, subject_person_id, subject)
+            )
+
+        if reasons:
+            # A shared relative outweighs a shaky spelling: "Khaleel, brother
+            # of the same man" is the same person as "Khalil".
+            score = 0.5 + 0.5 * score
+
+        if score >= cutoff:
+            results.append(
+                {
+                    "kind": "person",
+                    "id": row["id"],
+                    "person_id": row["id"],
+                    "label": row_display_name(row),
+                    "score": round(score, 3),
+                    "reasons": reasons,
+                }
+            )
+
+    # --- against other pending claims --------------------------------------
+    for row in conn.execute(
+        "SELECT * FROM submissions WHERE status = 'pending' ORDER BY id"
+    ):
+        if exclude_submission_id is not None and row["id"] == exclude_submission_id:
+            continue
+        payload = submission_payload(row)
+        about = payload.get("about") or {}
+
+        for entry in payload.get("people") or []:
+            score = name_similarity(given_name, entry.get("given_name", ""))
+            reasons = []
+
+            same_subject = (
+                subject_person_id is not None
+                and about.get("person_id") == subject_person_id
+            ) or (
+                subject_submission_id is not None
+                and about.get("submission_id") == subject_submission_id
+            )
+            if same_subject and entry.get("role") == role:
+                reasons.append(
+                    f"someone else described the same {role} of the same person"
+                )
+                score = 0.5 + 0.5 * score
+
+            if score >= cutoff:
+                results.append(
+                    {
+                        "kind": "submission",
+                        "id": row["id"],
+                        "person_id": None,
+                        "label": submission_person_label(entry),
+                        "score": round(score, 3),
+                        "reasons": reasons,
+                        "submitted_by": row["telegram_user_id"],
+                    }
+                )
+
+    results.sort(key=lambda match: match["score"], reverse=True)
+    return results
 
 
 # ===========================================================================

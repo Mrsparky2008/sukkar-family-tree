@@ -212,6 +212,15 @@ def _build_correction(
 # ---------------------------------------------------------------------------
 
 
+#: Key the handlers inject into `answers` so prompts can name the person the
+#: cursor is on. Prefixed so it cannot collide with a real answer id.
+SUBJECT_KEY = "_subject_name"
+
+
+def _subject(answers: dict[str, Any]) -> str | None:
+    return answers.get(SUBJECT_KEY)
+
+
 def _his_her(answers: dict[str, Any]) -> str:
     return texts.his_her(answers.get("sex"))
 
@@ -234,12 +243,12 @@ IDENTIFY = Flow(
 ADD_PARENTS = Flow(
     kind=submissions.ADD_PARENTS,
     steps=[
-        Step("father_given", NAME, texts.ASK_FATHER_GIVEN, optional=True),
-        Step("mother_given", NAME, texts.ASK_MOTHER_GIVEN, optional=True),
+        Step("father_given", NAME, lambda a: texts.ask_father(_subject(a)), optional=True),
+        Step("mother_given", NAME, lambda a: texts.ask_mother(_subject(a)), optional=True),
         Step(
             "mother_family",
             TEXT,
-            texts.ASK_MOTHER_FAMILY,
+            lambda a: texts.ask_mother_family(_subject(a)),
             optional=True,
             only_if="mother_given",
         ),
@@ -254,7 +263,7 @@ ADD_SIBLING = Flow(
         Step(
             "sex",
             CHOICE,
-            texts.ASK_SIBLING_SEX,
+            lambda a: texts.ask_sibling_sex(_subject(a)),
             choices=[(texts.SIBLING_BROTHER, "M"), (texts.SIBLING_SISTER, "F")],
         ),
         Step(
@@ -273,7 +282,7 @@ ADD_SPOUSE = Flow(
         Step(
             "sex",
             CHOICE,
-            texts.ASK_SPOUSE_SEX,
+            lambda a: texts.ask_spouse_sex(_subject(a)),
             choices=[(texts.SPOUSE_HUSBAND, "M"), (texts.SPOUSE_WIFE, "F")],
         ),
         Step(
@@ -298,7 +307,7 @@ ADD_CHILD = Flow(
         Step(
             "sex",
             CHOICE,
-            texts.ASK_CHILD_SEX,
+            lambda a: texts.ask_child_sex(_subject(a)),
             choices=[(texts.CHILD_SON, "M"), (texts.CHILD_DAUGHTER, "F")],
         ),
         Step(
@@ -318,12 +327,13 @@ CORRECTION = Flow(
 )
 
 
-#: Menu label -> flow, in the order the spec lists them.
+#: Menu key -> flow, in the order the spec lists them. The visible label comes
+#: from texts.menu_labels() so it can name whoever the cursor is on.
 MENU: list[tuple[str, Flow]] = [
-    (texts.MENU_ADD_PARENTS, ADD_PARENTS),
-    (texts.MENU_ADD_SIBLING, ADD_SIBLING),
-    (texts.MENU_ADD_SPOUSE, ADD_SPOUSE),
-    (texts.MENU_ADD_CHILD, ADD_CHILD),
+    ("parents", ADD_PARENTS),
+    ("sibling", ADD_SIBLING),
+    ("spouse", ADD_SPOUSE),
+    ("child", ADD_CHILD),
 ]
 
 BY_KIND: dict[str, Flow] = {

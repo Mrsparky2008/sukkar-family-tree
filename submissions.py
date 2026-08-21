@@ -149,6 +149,7 @@ def build(
     about: dict[str, Any] | None = None,
     people: list[dict[str, Any]] | None = None,
     note: str | None = None,
+    source: str | None = None,
     target_submission_id: int | None = None,
     target_person_id: int | None = None,
 ) -> dict[str, Any]:
@@ -163,6 +164,10 @@ def build(
         "about": about or subject(),
         "people": people or [],
         "note": (note or "").strip() or None,
+        # Who the contributor got this from. Elders mostly will not use
+        # Telegram, so their knowledge arrives second-hand through a son or a
+        # niece. Recording that is not recoverable later.
+        "source": (source or "").strip() or None,
         "submitted_by": submitted_by,
     }
     if kind == CORRECTION:
@@ -346,6 +351,8 @@ def detail_lines(payload: dict[str, Any]) -> list[str]:
             lines.append(f"  {label}: {entry['given_name']} — {' — '.join(extras)}")
     if payload.get("note") and payload.get("kind") != CORRECTION:
         lines.append(f"  Note: {payload['note']}")
+    if payload.get("source"):
+        lines.append(f"  Told to them by: {payload['source']}")
     return lines
 
 

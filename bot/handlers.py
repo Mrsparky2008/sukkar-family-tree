@@ -30,7 +30,17 @@ log = logging.getLogger(__name__)
 
 # --- conversation states ---------------------------------------------------
 
-MENU, ASK, CONFIRM_ANSWER, CONFIRM_SUBMIT, IDENTITY_MATCH, PICK_SUBMISSION = range(6)
+(
+    MENU,
+    ASK,
+    CONFIRM_ANSWER,
+    CONFIRM_SUBMIT,
+    IDENTITY_MATCH,
+    PICK_SUBMISSION,
+    PICK_SUBJECT,
+    CLIMB,
+    ASK_SOURCE,
+) = range(9)
 
 # --- callback data ---------------------------------------------------------
 
@@ -45,6 +55,11 @@ CB_CANCEL = "cancel"
 CB_IDENTITY = "who"
 CB_NOBODY = "who:none"
 CB_FIX = "fix"
+CB_SUBJECT = "subj"
+CB_SWITCH = "menu:switch"
+CB_CLIMB_YES = "climb:yes"
+CB_CLIMB_NO = "climb:no"
+CB_SOURCE = "source"
 
 
 # ===========================================================================
@@ -80,10 +95,46 @@ def _reset(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("flow", None)
 
 
-def _menu_keyboard() -> InlineKeyboardMarkup:
+def _cursor(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any] | None:
+    """Who we are currently adding relatives for. None means the contributor."""
+    return context.user_data.get("subject")
+
+
+def _set_cursor(context: ContextTypes.DEFAULT_TYPE, subject: dict[str, Any] | None):
+    if subject is None:
+        context.user_data.pop("subject", None)
+    else:
+        context.user_data["subject"] = subject
+
+
+async def _subject_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
+    """The cursor as a payload subject, defaulting to the contributor."""
+    cursor = _cursor(context)
+    if cursor is not None:
+        return submissions.subject(
+            person_id=cursor.get("person_id"),
+            submission_id=cursor.get("submission_id"),
+            label=cursor.get("label"),
+        )
+    who = await store.contributor_state(update.effective_user.id)
+    return submissions.subject(
+        person_id=who["person_id"],
+        submission_id=who["identify_submission_id"],
+        label=who["label"] or "themselves",
+    )
+
+
+def _subject_name(context: ContextTypes.DEFAULT_TYPE) -> str:
+    cursor = _cursor(context)
+    return cursor["label"] if cursor else texts.SUBJECT_YOU
+
+
+def _menu_keyboard(subject: str | None = None) -> InlineKeyboardMarkup:
+    labels = texts.menu_labels(subject)
     rows = [
-        [_button(label, f"{CB_MENU}:{flow.kind}")] for label, flow in flows.MENU
+        [_button(labels[key], f"{CB_MENU}:{flow.kind}")] for key, flow in flows.MENU
     ]
+    rows.append([_button(texts.MENU_SWITCH, CB_SWITCH)])
     rows.append([_button(texts.MENU_FIX, f"{CB_MENU}:{submissions.CORRECTION}")])
     rows.append([_button(texts.MENU_VIEW, f"{CB_MENU}:view")])
     return _kb(rows)
@@ -91,8 +142,14 @@ def _menu_keyboard() -> InlineKeyboardMarkup:
 
 async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: str | None = None):
     _reset(context)
-    text = f"{lead}\n\n{texts.MENU_PROMPT}" if lead else texts.MENU_PROMPT
-    await _say(update, text, _menu_keyboard())
+    cursor = _cursor(context)
+    name = cursor["label"] if cursor else None
+    parts = [lead] if lead else []
+    if name:
+        # Only worth saying when it is not the obvious default.
+        parts.append(texts.SUBJECT_HEADING.format(name=name))
+    parts.append(texts.MENU_PROMPT)
+    await _say(update, "\n\n".join(parts), _menu_keyboard(name))
     return MENU
 
 
@@ -122,6 +179,10 @@ def _current(context: ContextTypes.DEFAULT_TYPE) -> tuple[flows.Flow, flows.Step
 async def _ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Put the current question, or finish the flow if there are none left."""
     state = _state(context)
+    cursor = _cursor(context)
+    if flows.SUBJECT_KEY not in state["answers"]:
+        state["answers"][flows.SUBJECT_KEY] = cursor["label"] if cursor else None
+
     flow, step = _current(context)
 
     if step is None:
@@ -146,11 +207,17 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
     user_id = update.effective_user.id
     who = await store.contributor_state(user_id)
 
-    about = submissions.subject(
-        person_id=who["person_id"],
-        submission_id=who["identify_submission_id"],
-        label=who["label"] or "themselves",
-    )
+    # Identification is always about the contributor; everything else follows
+    # the cursor, which is how they climb past their own parents.
+    if flow.kind == submissions.IDENTIFY:
+        about = submissions.subject(
+            person_id=who["person_id"],
+            submission_id=who["identify_submission_id"],
+            label=who["label"] or "themselves",
+        )
+    else:
+        about = await _subject_of(update, context)
+
     submitted_by = submissions.submitter(
         user_id, person_id=who["person_id"], label=who["label"]
     )
@@ -177,6 +244,7 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
         _kb(
             [
                 [_button(texts.SEND_IT, CB_SEND)],
+                [_button(texts.SOURCE_BUTTON, CB_SOURCE)],
                 [_button(texts.START_OVER, CB_OVER)],
                 [_button(texts.CANCEL, CB_CANCEL)],
             ]
@@ -274,6 +342,9 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else texts.VIEW_TREE_UNPUBLISHED
         )
         return await _show_menu(update, context, text)
+
+    if choice == "switch":
+        return await _pick_subject(update, context)
 
     if choice == submissions.CORRECTION:
         return await _start_correction(update, context)
@@ -375,10 +446,153 @@ async def on_submit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     payload = state.get("payload")
     if payload is None:
         return await _show_menu(update, context, texts.ERROR)
+    return await _send(update, context, payload)
 
-    await store.queue(update.effective_user.id, payload)
-    done = texts.FIX_SAVED if payload["kind"] == submissions.CORRECTION else texts.SAVED
-    return await _show_menu(update, context, done)
+
+async def _send(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
+    result = await store.queue(update.effective_user.id, payload)
+    context.user_data["last_submission_id"] = result["submission_id"]
+
+    if payload["kind"] == submissions.CORRECTION:
+        return await _show_menu(update, context, texts.FIX_SAVED)
+    if payload["kind"] == submissions.IDENTIFY:
+        return await _show_menu(update, context, texts.SAVED)
+    return await _offer_climb(update, context, payload)
+
+
+# ===========================================================================
+# Moving the cursor
+# ===========================================================================
+#
+# An uncle is your father's brother. Rather than a flow per relation, the
+# subject moves and the same five questions cover everything.
+# ===========================================================================
+
+
+async def _pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    candidates = await store.subject_candidates(update.effective_user.id)
+    if not candidates:
+        return await _show_menu(update, context, texts.SWITCH_NOBODY)
+
+    context.user_data["subject_choices"] = candidates
+    rows = []
+    for index, candidate in enumerate(candidates):
+        label = candidate["label"]
+        if candidate.get("note"):
+            label = f"{label} ({candidate['note']})"
+        rows.append([_button(_trim(label), f"{CB_SUBJECT}:{index}")])
+    rows.append([_button(texts.CANCEL, CB_CANCEL)])
+
+    await _say(update, texts.SWITCH_PICK, _kb(rows))
+    return PICK_SUBJECT
+
+
+async def on_pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    index = int(query.data.split(":", 1)[1])
+    choices = context.user_data.get("subject_choices") or []
+    if index >= len(choices):
+        return await _show_menu(update, context, texts.ERROR)
+
+    chosen = choices[index]
+    _set_cursor(context, None if chosen.get("note") == "you" else chosen)
+    return await _show_menu(
+        update, context, texts.SWITCHED.format(name=chosen["label"])
+    )
+
+
+# ===========================================================================
+# Climbing
+# ===========================================================================
+#
+# After a save, offer the obvious next step. This is what walks a contributor
+# up the generations instead of leaving them stranded at their own parents.
+# ===========================================================================
+
+
+async def _offer_climb(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
+    """Suggest moving to the person just added and asking about their parents."""
+    entries = [
+        entry
+        for entry in payload.get("people") or []
+        if entry.get("role") in (submissions.FATHER, submissions.MOTHER,
+                                 submissions.SIBLING, submissions.CHILD,
+                                 submissions.SPOUSE)
+    ]
+    if not entries:
+        return await _show_menu(update, context, texts.SAVED)
+
+    # Prefer the father: the patriline is what carries a branch upward.
+    entries.sort(key=lambda e: 0 if e["role"] == submissions.FATHER else 1)
+    target = entries[0]
+
+    context.user_data["climb_to"] = {
+        "label": submissions.person_label(target),
+        "sex": target.get("sex"),
+    }
+    await _say(
+        update,
+        f"{texts.SAVED}\n\n"
+        + texts.CLIMB_PARENTS.format(name=target["given_name"]),
+        _kb(
+            [
+                [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
+                [_button(texts.CLIMB_NO, CB_CLIMB_NO)],
+            ]
+        ),
+    )
+    return CLIMB
+
+
+async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == CB_CLIMB_NO:
+        return await _show_menu(update, context, texts.DEAD_END)
+
+    # The person we just named is still in the queue, so point the cursor at
+    # their submission rather than waiting on an admin.
+    target = context.user_data.get("climb_to") or {}
+    submission_id = context.user_data.get("last_submission_id")
+    if not target or submission_id is None:
+        return await _show_menu(update, context, texts.ERROR)
+
+    _set_cursor(
+        context,
+        {
+            "person_id": None,
+            "submission_id": submission_id,
+            "label": target["label"],
+        },
+    )
+    _begin(context, flows.ADD_PARENTS)
+    return await _ask(update, context)
+
+
+# ===========================================================================
+# Who told you this
+# ===========================================================================
+
+
+async def on_source_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    await _say(update, texts.SOURCE_ASK, _kb([[_button(texts.CANCEL, CB_CANCEL)]]))
+    return ASK_SOURCE
+
+
+async def on_source_given(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = _state(context)
+    payload = state.get("payload")
+    if payload is None:
+        return await _show_menu(update, context, texts.ERROR)
+    try:
+        payload["source"] = flows.clean_text(update.effective_message.text or "")
+    except flows.FlowError as problem:
+        await _say(update, str(problem))
+        return ASK_SOURCE
+    return await _send(update, context, payload)
 
 
 # ===========================================================================

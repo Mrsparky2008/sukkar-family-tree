@@ -7,9 +7,9 @@ public read-only web page.
 Built white-label: everything family-specific lives in `config.py`, so another
 family can fork this repo, edit that one file, and deploy.
 
-> **Status: Steps 1–2 of 4 complete.**
-> Foundation and Telegram capture are built. The admin review queue (step 3)
-> and the public view (step 4) are not.
+> **Status: ready for a pilot.**
+> Foundation, Telegram capture, and a command-line review queue are built and
+> tested. The Flask admin interface and the public Cytoscape view are not.
 
 ---
 
@@ -103,7 +103,9 @@ seed.py         Hand-editable starting data, plus validate / load / report.
 tests/          python -m unittest discover -s tests -t .
 
 submissions.py  The payload contract: what a submission looks like, and how
-                to describe one. Shared by the bot and the admin interface.
+                to describe one. Shared by the bot and the review queue.
+review.py       The review queue on the command line. Enough to run a pilot
+                before the Flask interface exists.
 
 bot/            Step 2 — Telegram capture. See bot/README.md.
 admin/          Step 3 — Flask review queue.     Not built.
@@ -163,6 +165,64 @@ instance — is left unassigned rather than guessed at.
   A test fails the build if anything under `bot/` calls a privileged write.
 
 Details in `bot/README.md`.
+
+## Adding relatives for anyone, not just yourself
+
+A contributor can only enter about six people if every question is about
+*them*. So the bot keeps a cursor — whoever it is currently adding relatives
+for — and moves it. An uncle is your father's brother, so pointing the cursor
+at your father turns the same five questions into uncles and aunts. Every
+prompt follows the cursor: *"What's Youssef's father's first name?"*
+
+After each save the bot offers the next step rather than dropping back to a
+menu, which is what walks someone up the generations:
+
+```
+Saved.
+Do you know Youssef's parents?          [Yes, let's do that] [No, that's all I know]
+```
+
+It climbs until they run out, then goes sideways. A contributor can point the
+cursor at somebody still sitting in the queue, so naming a grandfather never
+waits on an admin approving the father first.
+
+## Corroboration
+
+Half the men in a branch answer to the same given name, so matching on
+spelling alone is weak. What identifies someone is who they are attached to.
+
+`db.corroborate()` scores a claim against both people already in the tree and
+other pending claims — because two brothers submitting the same third brother
+collide in the queue, before either is approved. It reports the evidence:
+
+```
+#3  Khaleel as brother of Georges Youssef Sukkar
+    from Georges Youssef Sukkar   [pending]
+    told to them by his mother Nada
+    ? Khalil Youssef Sukkar (in the tree, 0.885) — same father, same mother
+```
+
+That is a misspelling caught by shared parents, not by the spelling.
+
+It stays a hint. Nothing is auto-merged and nothing is auto-rejected — but
+approving something that scores 0.9 or higher against an existing person is
+refused until the reviewer says which they meant, because one tired tap
+otherwise creates a second Youssef and moves his son onto the copy.
+
+## Reviewing
+
+```bash
+python review.py                       # the queue, with evidence
+python review.py --show 4              # one submission in full
+python review.py --approve 4           # accept it, create the people
+python review.py --merge 4 --into 12   # it is person 12 — link, don't duplicate
+python review.py --reject 4 --note "not a relative"
+python review.py --tree                # the family as it stands
+```
+
+Merging is not discarding: the relationship the submission claimed still gets
+applied, it just attaches to the existing person. And merging only ever fills
+gaps — it never overwrites something an admin already recorded.
 
 ---
 

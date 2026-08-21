@@ -55,12 +55,91 @@ IDENTITY_ALREADY_LINKED = "You're already in as {name}."
 
 MENU_PROMPT = "What would you like to do?"
 
+#: The cursor. Every flow adds relatives *for* somebody, and that somebody
+#: starts as the contributor but moves as they work up the family.
+SUBJECT_HEADING = "Adding relatives for: {name}"
+SUBJECT_YOU = "you"
+
+MENU_SWITCH = "Somebody else in the family"
+
+SWITCH_PICK = (
+    "Who are we adding relatives for?\n\n"
+    "Pick anyone you know about — their parents, their brothers and sisters, "
+    "whoever you can remember."
+)
+
+SWITCH_NOBODY = (
+    "There's nobody else I can point you at yet. Add a few relatives first "
+    "and they'll show up here."
+)
+
+SWITCHED = "Right — {name}."
+
 MENU_ADD_PARENTS = "Add my parents"
 MENU_ADD_SIBLING = "Add a sibling"
 MENU_ADD_SPOUSE = "Add a spouse"
 MENU_ADD_CHILD = "Add a child"
 MENU_FIX = "Fix something I submitted"
 MENU_VIEW = "View the tree"
+
+
+# --- following the cursor --------------------------------------------------
+#
+# Every prompt below has to work whether the contributor is talking about
+# themselves or about their great-grandfather. "your father" is wrong the
+# moment the cursor moves, and a bot that gets that wrong reads as broken.
+
+
+def possessive(subject: str | None) -> str:
+    """"your" when we are talking about the contributor, "Youssef's" when not."""
+    return "your" if not subject else f"{subject}'s"
+
+
+def menu_labels(subject: str | None) -> dict[str, str]:
+    if not subject:
+        return {
+            "parents": MENU_ADD_PARENTS,
+            "sibling": MENU_ADD_SIBLING,
+            "spouse": MENU_ADD_SPOUSE,
+            "child": MENU_ADD_CHILD,
+        }
+    return {
+        "parents": f"Add {subject}'s parents",
+        "sibling": f"Add a brother or sister of {subject}",
+        "spouse": f"Add {subject}'s husband or wife",
+        "child": f"Add a child of {subject}",
+    }
+
+
+def ask_father(subject: str | None) -> str:
+    return f"What's {possessive(subject)} father's first name?"
+
+
+def ask_mother(subject: str | None) -> str:
+    return f"And {possessive(subject)} mother's first name?"
+
+
+def ask_mother_family(subject: str | None) -> str:
+    who = "your mother" if not subject else f"{subject}'s mother"
+    return f"What was {who}'s family name before she married?"
+
+
+def ask_sibling_sex(subject: str | None) -> str:
+    if not subject:
+        return ASK_SIBLING_SEX
+    return f"Was this a brother or a sister of {subject}?"
+
+
+def ask_spouse_sex(subject: str | None) -> str:
+    if not subject:
+        return ASK_SPOUSE_SEX
+    return f"Was this {subject}'s husband or wife?"
+
+
+def ask_child_sex(subject: str | None) -> str:
+    if not subject:
+        return ASK_CHILD_SEX
+    return f"Was this {subject}'s son or daughter?"
 
 
 # --- shared prompts --------------------------------------------------------
@@ -87,6 +166,26 @@ NAME_EMPTY = "I didn't catch a name there. Try again?"
 SAVED = (
     "Saved. It's with your branch's reviewer now — it won't show on the tree "
     "until they've had a look."
+)
+
+#: After a save, offer the obvious next step rather than dropping back to a
+#: menu. This is what walks a contributor up the generations instead of
+#: leaving them at their own parents.
+CLIMB_PARENTS = "Do you know {name}'s parents?"
+CLIMB_SIBLINGS = "Did {name} have brothers or sisters?"
+CLIMB_YES = "Yes, let's do that"
+CLIMB_NO = "No, that's all I know"
+
+DEAD_END = (
+    "That's genuinely useful — most people can't get that far back.\n\n"
+    "If you ever sit down with someone older who remembers more, come back "
+    "and we'll keep going."
+)
+
+SOURCE_BUTTON = "Someone else told me this"
+SOURCE_ASK = (
+    "Who told you? A name is enough — it goes on the record so we know where "
+    "this came from."
 )
 
 CANCELLED = "Dropped that one. Nothing was saved."
@@ -168,6 +267,12 @@ VIEW_TREE_UNPUBLISHED = (
 
 
 # --- housekeeping ----------------------------------------------------------
+
+RELAY_SUGGEST = (
+    "You've just added {name}. If {he_she} uses Telegram, send them this — "
+    "they'll be recognised straight away, because you've already put them in:"
+    "\n\nhttps://t.me/{bot}"
+)
 
 SHARE = (
     f"Pass this on to any {FAMILY} relative:\n\n"

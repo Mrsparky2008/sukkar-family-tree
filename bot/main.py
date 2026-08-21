@@ -78,6 +78,19 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             ],
             handlers.CONFIRM_SUBMIT: [
                 CallbackQueryHandler(handlers.on_submit, pattern=r"^(send|over)$"),
+                CallbackQueryHandler(handlers.on_source_button, pattern=r"^source$"),
+                cancel_button,
+            ],
+            handlers.ASK_SOURCE: [
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_source_given),
+            ],
+            handlers.PICK_SUBJECT: [
+                CallbackQueryHandler(handlers.on_pick_subject, pattern=r"^subj:"),
+                cancel_button,
+            ],
+            handlers.CLIMB: [
+                CallbackQueryHandler(handlers.on_climb, pattern=r"^climb:"),
                 cancel_button,
             ],
             handlers.IDENTITY_MATCH: [
