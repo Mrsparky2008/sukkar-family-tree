@@ -264,11 +264,13 @@ IDENTIFY = Flow(
             only_if="family",
             only_if_value=FAMILY_OTHER,
         ),
+        # Not optional: everybody knows their own father's name, and the
+        # matcher needs it. "I don't know" stays available for ancestors,
+        # where it is a real answer.
         Step(
             "father_given",
             NAME,
             f"{texts.ASK_SELF_FATHER}\n\n{texts.ASK_SELF_FATHER_WHY}",
-            optional=True,
         ),
     ],
     build=_build_identify,

@@ -405,9 +405,9 @@ class AddParentsTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
-        await chat.tap(texts.SKIP)          # father unknown at signup
+        await chat.say("Fares")             # own father: always known, now required
         await chat.tap(texts.MENU_ADD_PARENTS)
-        await chat.say("Youssef")
+        # father pre-filled from signup; only the mother is asked
         await chat.say("Nada")
         await chat.say("Karam")
         await chat.tap(texts.ADD_MORE)
@@ -415,7 +415,7 @@ class AddParentsTests(BotTestCase):
 
         payload = [q for q in self.queued() if q["payload"]["kind"] == submissions.ADD_PARENTS][0]
         roles = {e["role"]: e for e in payload["payload"]["people"]}
-        self.assertEqual(roles["father"]["given_name"], "Youssef")
+        self.assertEqual(roles["father"]["given_name"], "Fares")
         self.assertEqual(roles["mother"]["family_name"], "Karam")
 
     async def test_skipping_the_mother_skips_her_family_name_too(self):
@@ -429,9 +429,13 @@ class AddParentsTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
-        await chat.tap(texts.SKIP)
+        await chat.say("Fares")
         before = len(self.queued())
-        await chat.tap(texts.MENU_ADD_PARENTS)
+        # Point the cursor at their own pending record: no pre-filled father
+        # there, so both parents can be skipped — and skipping both is nothing.
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap("Zaher")
+        await chat.tap("Add Zaher Sukkar")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.SKIP)
         self.assertIn("nothing to send", chat.transcript())
@@ -858,7 +862,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.start()
         await chat.say("Abou-Khalil")
         await chat.tap(config.FAMILY_NAME)
-        await chat.tap(texts.SKIP)
+        await chat.say("Fares")
         self.assertEqual(
             self.queued()[0]["payload"]["people"][0]["given_name"], "Abou-Khalil"
         )
