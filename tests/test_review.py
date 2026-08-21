@@ -345,6 +345,96 @@ class NothingIsAutomaticTests(ReviewTestCase):
         self.assertEqual(db.count_people(self.conn), before)
 
 
+class SpellingPrecedenceTests(ReviewTestCase):
+    """Three relatives, three spellings, one man. Whose answer wins?"""
+
+    def setUp(self):
+        super().setUp()
+        self.semaan = db.create_person(
+            self.conn, "Semaan", sex="M", family_name="Succar"
+        )
+        self.steven = db.create_person(
+            self.conn, "Steven", sex="M", family_name="Sukar", father_id=self.semaan
+        )
+
+    def record_brother(self, spelling, user=111, label="Steven"):
+        return self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Tony", sex="M", family_name=spelling)],
+            S.subject(person_id=self.steven, label="Steven"),
+            user=user,
+        )
+
+    def sign_up_as(self, spelling, user=222):
+        payload = S.build(
+            S.IDENTIFY,
+            submitted_by=S.submitter(user),
+            about=S.subject(),
+            people=[
+                S.person(
+                    S.SELF, "Tony", family_name=spelling, father_given_name="Semaan"
+                )
+            ],
+        )
+        return db.add_submission(self.conn, user, payload)
+
+    def test_a_relatives_guess_is_used_when_it_is_all_there_is(self):
+        sid = self.record_brother("Succar")
+        tony = review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+        self.assertEqual(db.get_person(self.conn, tony)["family_name"], "Succar")
+        self.assertFalse(db.get_person(self.conn, tony)["family_name_self_reported"])
+
+    def test_the_persons_own_answer_overrides_a_guess(self):
+        sid = self.record_brother("Succar")
+        tony = review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+        review.merge(self.conn, self.sign_up_as("Sukkar"), tony, reviewed_by=1)
+
+        person = db.get_person(self.conn, tony)
+        self.assertEqual(person["family_name"], "Sukkar")
+        self.assertTrue(person["family_name_self_reported"])
+
+    def test_a_later_guess_cannot_overwrite_their_own_answer(self):
+        sid = self.record_brother("Succar")
+        tony = review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+        review.merge(self.conn, self.sign_up_as("Sukkar"), tony, reviewed_by=1)
+        review.merge(
+            self.conn, self.record_brother("Sukar", user=333), tony, reviewed_by=1
+        )
+        self.assertEqual(db.get_person(self.conn, tony)["family_name"], "Sukkar")
+
+    def test_every_spelling_anyone_claimed_is_kept(self):
+        """The same man is spelled differently on different countries' paper."""
+        sid = self.record_brother("Succar")
+        tony = review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+        review.merge(self.conn, self.sign_up_as("Sukkar"), tony, reviewed_by=1)
+        review.merge(
+            self.conn, self.record_brother("Sukar", user=333), tony, reviewed_by=1
+        )
+
+        claims = db.spelling_claims(self.conn, tony)
+        self.assertEqual(
+            {c["spelling"] for c in claims}, {"Succar", "Sukkar", "Sukar"}
+        )
+        self.assertEqual(
+            [c["spelling"] for c in claims if c["self_reported"]], ["Sukkar"]
+        )
+
+    def test_three_spellings_still_identify_the_same_man(self):
+        """Spelling contributes nothing to identity — relatives do."""
+        self.record_brother("Succar")
+        self.sign_up_as("Sukkar")
+        matches = db.corroborate(
+            self.conn,
+            "Tony",
+            role="sibling",
+            subject_person_id=self.steven,
+            family_name="Sukar",
+            threshold=0.5,
+        )
+        self.assertGreaterEqual(len(matches), 2)
+        self.assertTrue(all(m["score"] >= 0.9 for m in matches[:2]))
+
+
 class SpellingReportTests(ReviewTestCase):
     """A spelling is a border crossing, not a branch."""
 

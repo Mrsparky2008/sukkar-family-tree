@@ -84,6 +84,11 @@ CREATE TABLE IF NOT EXISTS people (
     mother_id              INTEGER REFERENCES people(id) ON DELETE SET NULL,
     branch_id              INTEGER REFERENCES branches(id) ON DELETE SET NULL,
     notes                  TEXT,
+    -- Whether this spelling came from the person themselves. A relative
+    -- guessing how you spell your own name loses to you every time; see
+    -- db.set_family_name().
+    family_name_self_reported INTEGER NOT NULL DEFAULT 0
+                              CHECK (family_name_self_reported IN (0, 1)),
     created_by_telegram_id INTEGER,
     created_at             TEXT    NOT NULL DEFAULT (datetime('now')),
 

@@ -209,6 +209,29 @@ transliteration, not descent — matching folds them together.
 Usually one clerk, at one border, on one day — and everyone below that person
 inherits it.
 
+### Whose spelling wins
+
+Three relatives can record the same man three ways: one guesses, one copies a
+headstone, one reads a passport. They are not equally authoritative.
+
+A person's own answer to "how do you spell your family name" beats anyone
+else's guess, and a guess never overwrites an answer:
+
+```
+after a brother's guess    : Succar
+after his own answer       : Sukkar
+after a cousin's later guess: Sukkar     <- unchanged
+```
+
+Every spelling anyone claimed is kept and shown in the review queue, because
+the same man really is spelled differently on Lebanese and Australian paper
+and somebody searching either way should find him.
+
+None of this affects identity. Spelling is folded away before matching, so
+what actually identifies a person is their father, their siblings, and their
+children — which is why three records under three spellings still collide as
+one man.
+
 ## Nothing is confirmed one name at a time
 
 An earlier version read every answer back for a yes/no. It doubled the taps

@@ -74,8 +74,28 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     # executescript ends the implicit transaction; re-assert the pragma.
     conn.execute("PRAGMA foreign_keys = ON")
+    _add_missing_columns(conn)
     sync_family_variants(conn)
     conn.commit()
+
+
+#: Columns added after a database may already exist. CREATE TABLE IF NOT
+#: EXISTS will not add them, so they go on here.
+_LATER_COLUMNS = {
+    "people": {
+        "family_name_self_reported": "INTEGER NOT NULL DEFAULT 0",
+    },
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in _LATER_COLUMNS.items():
+        existing = {
+            row["name"] for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 @contextmanager
@@ -358,6 +378,82 @@ def update_person(conn: sqlite3.Connection, person_id: int, **fields: Any) -> No
         f"UPDATE people SET {assignments} WHERE id = ?",
         (*fields.values(), person_id),
     )
+
+
+def set_family_name(
+    conn: sqlite3.Connection,
+    person_id: int,
+    family_name: str,
+    self_reported: bool,
+) -> bool:
+    """Record how this person's family name is spelled. Returns True if changed.
+
+    Precedence is the whole point. Three relatives can record the same man
+    three different ways — one guesses, one copies a headstone, one reads a
+    passport — and they are not equally authoritative. A person's own answer
+    to "how do you spell your family name" beats anyone else's guess, and a
+    guess never overwrites an answer.
+    """
+    row = get_person(conn, person_id)
+    if row is None:
+        return False
+
+    already_self = bool(row["family_name_self_reported"])
+    if already_self and not self_reported:
+        return False  # a guess does not overwrite what the person said
+    if row["family_name"] == family_name and already_self == self_reported:
+        return False
+
+    conn.execute(
+        "UPDATE people SET family_name = ?, family_name_self_reported = ?"
+        " WHERE id = ?",
+        (family_name.strip(), int(self_reported), person_id),
+    )
+    return True
+
+
+def spelling_claims(
+    conn: sqlite3.Connection, person_id: int
+) -> list[dict[str, Any]]:
+    """Every spelling anyone has claimed for this person, and who claimed it.
+
+    Kept because the same man is genuinely spelled differently on Lebanese and
+    Australian paper, and somebody searching either way should find him.
+    """
+    claims: list[dict[str, Any]] = []
+    row = get_person(conn, person_id)
+    if row is not None and row["family_name"]:
+        claims.append(
+            {
+                "spelling": row["family_name"],
+                "who": "themselves" if row["family_name_self_reported"] else "recorded",
+                "self_reported": bool(row["family_name_self_reported"]),
+            }
+        )
+
+    for submission in conn.execute(
+        "SELECT * FROM submissions WHERE resulting_person_id = ? ORDER BY id",
+        (person_id,),
+    ):
+        payload = submission_payload(submission)
+        self_reported = payload.get("kind") == "identify"
+        for entry in payload.get("people") or []:
+            spelling = entry.get("family_name")
+            if not spelling:
+                continue
+            if any(c["spelling"] == spelling for c in claims):
+                continue
+            who = payload.get("submitted_by") or {}
+            claims.append(
+                {
+                    "spelling": spelling,
+                    "who": "themselves"
+                    if self_reported
+                    else (who.get("label") or f"telegram {submission['telegram_user_id']}"),
+                    "self_reported": self_reported,
+                }
+            )
+    return claims
 
 
 def create_union(

@@ -140,6 +140,11 @@ def approve(
     with db.transaction(conn):
         if kind == submissions.IDENTIFY:
             primary = place(entries[0], True)
+            spelling = entries[0].get("family_name")
+            if spelling:
+                # They answered for themselves, which outranks any relative's
+                # guess already on the record.
+                db.set_family_name(conn, primary, spelling, self_reported=True)
             db.upsert_contributor(
                 conn,
                 payload["submitted_by"]["telegram_user_id"],
@@ -290,6 +295,16 @@ def show_queue(conn: sqlite3.Connection, status: str | None) -> None:
         print()
 
 
+def show_spelling_claims(conn: sqlite3.Connection, person_id: int) -> None:
+    claims = db.spelling_claims(conn, person_id)
+    if len(claims) < 2:
+        return
+    print("  recorded as:")
+    for claim in claims:
+        mark = "  <- their own answer" if claim["self_reported"] else ""
+        print(f"      {claim['spelling']} — by {claim['who']}{mark}")
+
+
 def show_one(conn: sqlite3.Connection, submission_id: int) -> None:
     row = db.get_submission(conn, submission_id)
     if row is None:
@@ -303,6 +318,8 @@ def show_one(conn: sqlite3.Connection, submission_id: int) -> None:
     for match in evidence(conn, payload, row['id']):
         why = ", ".join(match["reasons"]) or "name only"
         print(f"  ? {match['label']} ({match['kind']}, {match['score']}) — {why}")
+    if row["resulting_person_id"]:
+        show_spelling_claims(conn, row["resulting_person_id"])
     print()
 
 
