@@ -1,0 +1,11 @@
+# Step 1 (foundation) needs nothing here — it runs on the standard library
+# alone, sqlite3 included. Install these when the step that uses them lands.
+
+# Step 2 — Telegram capture
+python-telegram-bot>=21.0,<22
+
+# Step 3 — Admin review interface
+Flask>=3.0,<4
+
+# The public view (step 4) is one static HTML file loading Cytoscape.js from a
+# CDN. It has no Python dependency and no build step, by design.
