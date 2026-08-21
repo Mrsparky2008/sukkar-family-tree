@@ -84,6 +84,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 _LATER_COLUMNS = {
     "people": {
         "family_name_self_reported": "INTEGER NOT NULL DEFAULT 0",
+        "nickname": "TEXT",
     },
 }
 
@@ -177,6 +178,19 @@ def row_display_name(row: sqlite3.Row) -> str:
     )
 
 
+def display_name_with_nickname(row: sqlite3.Row) -> str:
+    """The computed name, with what people actually call them alongside.
+
+        Youssef Najib FAMILYNAME (Joe)
+
+    Half the family was anglicised at a border. Nobody looking for their uncle
+    types the name on his birth certificate.
+    """
+    base = row_display_name(row)
+    nickname = _optional(row, "nickname")
+    return f"{base} ({nickname})" if nickname else base
+
+
 def display_name_with_spellings(conn: sqlite3.Connection, row: sqlite3.Row) -> str:
     """The display name, plus any other spelling recorded for this person.
 
@@ -187,7 +201,7 @@ def display_name_with_spellings(conn: sqlite3.Connection, row: sqlite3.Row) -> s
     that there was a choice. Still one name rule underneath: this appends to
     what `display_name()` produced, it never builds a name itself.
     """
-    base = row_display_name(row)
+    base = display_name_with_nickname(row)
     others = [
         claim["spelling"]
         for claim in spelling_claims(conn, row["id"])
@@ -346,6 +360,7 @@ def create_person(
     *,
     family_name: str | None = None,
     given_name_ar: str | None = None,
+    nickname: str | None = None,
     sex: str | None = None,
     father_id: int | None = None,
     mother_id: int | None = None,
@@ -356,14 +371,15 @@ def create_person(
     """Insert a person and return their id. Privileged — see the note above."""
     cursor = conn.execute(
         """
-        INSERT INTO people (given_name, given_name_ar, family_name, sex,
+        INSERT INTO people (given_name, given_name_ar, nickname, family_name, sex,
                             father_id, mother_id, branch_id, notes,
                             created_by_telegram_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             given_name.strip(),
             given_name_ar,
+            nickname,
             (family_name or config.FAMILY_NAME).strip(),
             sex,
             father_id,
@@ -381,6 +397,7 @@ def update_person(conn: sqlite3.Connection, person_id: int, **fields: Any) -> No
     allowed = {
         "given_name",
         "given_name_ar",
+        "nickname",
         "family_name",
         "sex",
         "father_id",

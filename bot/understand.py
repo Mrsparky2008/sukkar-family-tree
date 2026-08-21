@@ -20,6 +20,11 @@ from typing import Any, Iterable
 #: otherwise become part of the name and show up on the tree forever.
 EDGE_PUNCTUATION = " \t\r\n.,;:!?\"'`´’‘“”()[]{}<>«»…"
 
+#: What `tidy` strips from a whole message. Brackets are NOT in here: a
+#: message ending "...Youssef (Joe)" would lose its closing bracket, and the
+#: nickname would silently become part of the surname.
+_MESSAGE_EDGES = " \t\r\n.,;:!?\"'`´’‘“”<>«»…"
+
 _AFFIRMATIVE = {
     "y", "ye", "yes", "yep", "yeah", "yea", "yup", "ok", "okay", "okey",
     "sure", "please", "go", "go on", "goahead", "correct", "right", "true",
@@ -48,7 +53,7 @@ def tidy(text: str) -> str:
     Inner punctuation survives, because plenty of real names carry it —
     Abou-Khalil, N'Diaye, O'Brien.
     """
-    return " ".join(text.split()).strip(EDGE_PUNCTUATION).strip()
+    return " ".join(text.split()).strip(_MESSAGE_EDGES).strip()
 
 
 def _key(text: str) -> str:

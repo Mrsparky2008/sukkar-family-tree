@@ -77,6 +77,28 @@ kept verbatim on the submission rather than pinned to whoever happened to be
 on the same line. Attributing "the others" by rule gets it wrong, and nobody
 notices.
 
+It also works **at the menu**, which is where people rest and therefore where
+they start typing.
+
+### What it reads
+
+| Written | Understood |
+|---|---|
+| `Wadiha is the daughter of Najib and Saide` | subject is Wadiha; Najib father, Saide mother |
+| `my mother Wadiha is the daughter of...` | subject is still Wadiha — "mother" is context, not her name |
+| `Her siblings are Dibeh, Sonia and Rima` | three sisters of Wadiha |
+| `Rima married to Jamil Tarabay` | Jamil is Rima's husband, not the subject's |
+| `Hanna (John)` | nickname John |
+| `Clemence (she became a nun)` | a remark, not a nickname |
+| `Clemence Haddad, sister clemence` | one woman, noted as also called Sister Clemence |
+| `Khalil Haddad Hanna Haddad` | two men — the repeated surname is the missing comma |
+| `the other girls are single` | kept loose; it names nobody in particular |
+
+A message naming its own subject overrides whoever the bot was asking about,
+and that person is looked up in the tree *and* in the contributor's own
+basket — because making somebody wait for an admin before they can name their
+grandmother's parents is how a session ends.
+
 Ordinary single answers still go down the ordinary path. Only a message that
 names a relationship, or clearly lists several people, gets parsed.
 

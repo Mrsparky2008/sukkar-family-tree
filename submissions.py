@@ -68,6 +68,7 @@ PERSON_FIELDS = frozenset(
         "role",
         "given_name",
         "given_name_ar",
+        "nickname",
         "sex",
         "family_name",
         "notes",
@@ -90,6 +91,7 @@ def person(
     *,
     sex: str | None = None,
     given_name_ar: str | None = None,
+    nickname: str | None = None,
     family_name: str | None = None,
     father_given_name: str | None = None,
     notes: str | None = None,
@@ -105,6 +107,7 @@ def person(
         "role": role,
         "given_name": given_name.strip(),
         "given_name_ar": (given_name_ar or "").strip() or None,
+        "nickname": (nickname or "").strip() or None,
         "sex": sex,
         "family_name": (family_name or "").strip() or None,
         "father_given_name": (father_given_name or "").strip() or None,
@@ -298,8 +301,13 @@ def person_label(entry: dict[str, Any]) -> str:
     name = entry.get("given_name", "?")
     if entry.get("family_name"):
         name = f"{name} {entry['family_name']}"
-    if entry.get("given_name_ar"):
-        name = f"{name} ({entry['given_name_ar']})"
+    extras = [
+        value
+        for value in (entry.get("nickname"), entry.get("given_name_ar"))
+        if value
+    ]
+    if extras:
+        name = f"{name} ({', '.join(extras)})"
     return name
 
 

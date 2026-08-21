@@ -62,6 +62,7 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             handlers.MENU: [
                 CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 CallbackQueryHandler(handlers.on_menu, pattern=r"^menu:"),
+                MessageHandler(TEXT_ANSWER, handlers.on_menu_text),
             ],
             handlers.ASK: [
                 CallbackQueryHandler(handlers.on_choice, pattern=r"^(ans:|skip$)"),

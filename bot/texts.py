@@ -212,9 +212,22 @@ DICTATED = (
     "Here's what I understood. Tap anything that's wrong."
 )
 
-DICTATED_UNSURE = (
-    "\n\nI had to guess in a place or two — which of a pair of parents is "
-    "the father, and whether a husband or a wife was meant. Worth a look."
+#: Only ever list what was actually guessed. Warning about a guess the bot
+#: did not make teaches people to ignore the warnings.
+DICTATED_UNSURE = "\n\nTwo things I guessed at: {reasons}. Worth a look."
+DICTATED_UNSURE_ONE = "\n\nOne thing I guessed at: {reasons}. Worth a look."
+
+DICTATED_SUBJECT = "These are {name}'s relatives, so that's who I've put them under."
+
+DICTATED_SUBJECT_UNKNOWN = (
+    "You've told me about {name}'s family, but I don't know who {name} is yet.\n\n"
+    "Add {name} first — then tell me this again and it'll slot straight in."
+)
+
+MENU_TYPE_HINT = (
+    "Use a button above — or just type the names out and I'll sort them:\n\n"
+    "    my father's parents are Toufic and Cilene\n"
+    "    his sisters are Dibeh, Sonia and Rima"
 )
 
 DICTATED_NOTHING = (

@@ -165,3 +165,84 @@ class ParsingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class DeclaredSubjectTests(unittest.TestCase):
+    """A message can be about somebody other than whoever was asked about."""
+
+    def test_daughter_of_names_its_own_subject_and_her_parents(self):
+        reading = dictation.parse(
+            "Wadiha is the daughter of Najib Haddad and Saide Taouk"
+        )
+        self.assertEqual(reading.subject, "Wadiha")
+        self.assertEqual(reading.subject_sex, "F")
+        self.assertEqual(
+            [(m.role, m.label()) for m in reading.people],
+            [(S.FATHER, "Najib Haddad"), (S.MOTHER, "Saide Taouk")],
+        )
+
+    def test_the_subject_is_never_added_as_her_own_relative(self):
+        """Read backwards this makes a woman her own mother's sibling."""
+        reading = dictation.parse("Wadiha is the daughter of Najib and Saide")
+        self.assertNotIn("Wadiha", [m.given_name for m in reading.people])
+
+    def test_son_of_gives_a_male_subject(self):
+        reading = dictation.parse("Sami is the son of Elie and Rita")
+        self.assertEqual(reading.subject_sex, "M")
+
+    def test_a_relationship_word_before_the_name_is_not_the_name(self):
+        reading = dictation.parse("my mother Wadiha is the daughter of Najib and Saide")
+        self.assertEqual(reading.subject, "Wadiha")
+
+    def test_the_declared_subject_carries_to_later_lines(self):
+        reading = dictation.parse(
+            "Wadiha is the daughter of Najib and Saide\n"
+            "Her siblings are Khalil and Rima"
+        )
+        siblings = [m for m in reading.people if m.role == S.SIBLING]
+        self.assertEqual([m.given_name for m in siblings], ["Khalil", "Rima"])
+
+
+class NicknamesAndTitlesTests(unittest.TestCase):
+    def test_a_bracketed_name_is_a_nickname(self):
+        reading = dictation.parse("his brothers are Hanna (John) and Youssef (Joe)")
+        self.assertEqual(
+            [(m.given_name, m.nickname) for m in reading.people],
+            [("Hanna", "John"), ("Youssef", "Joe")],
+        )
+
+    def test_a_bracketed_sentence_is_a_remark(self):
+        reading = dictation.parse("his sister is Clemence (she became a nun)")
+        self.assertIsNone(reading.people[0].nickname)
+        self.assertEqual(reading.people[0].note, "she became a nun")
+
+    def test_a_nickname_lands_on_the_right_person(self):
+        """It used to be handed to whoever came first in the fragment."""
+        reading = dictation.parse(
+            "his brothers are Khalil Haddad Hanna (John) Haddad",
+            subject_name=None,
+        )
+        by_name = {m.given_name: m.nickname for m in reading.people}
+        self.assertIsNone(by_name.get("Khalil"))
+        self.assertEqual(by_name.get("Hanna"), "John")
+
+    def test_a_title_folds_into_the_person_already_named(self):
+        reading = dictation.parse(
+            "his sister is Clemence Haddad, sister clemence"
+        )
+        self.assertEqual(len(reading.people), 1)
+        self.assertIn("Sister Clemence", reading.people[0].note or "")
+
+    def test_a_missing_comma_between_two_relatives_is_recovered(self):
+        import config
+
+        family = config.FAMILY_NAME
+        reading = dictation.parse(f"his brothers are Khalil {family} Hanna {family}")
+        self.assertEqual(
+            [m.label() for m in reading.people],
+            [f"Khalil {family}", f"Hanna {family}"],
+        )
+
+    def test_an_ordinary_two_part_name_is_not_split(self):
+        reading = dictation.parse("his brother is Khalil Abou Haddad")
+        self.assertEqual(len(reading.people), 1)

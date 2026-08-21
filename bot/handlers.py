@@ -744,6 +744,40 @@ def _subject_name_or_none(context: ContextTypes.DEFAULT_TYPE) -> str | None:
     return cursor["label"] if cursor else None
 
 
+async def _resolve_named_subject(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, name: str
+) -> dict[str, Any] | None:
+    """Find who a message means when it names its own subject.
+
+    "Wadiha is the daughter of..." is about Wadiha, whoever the bot happened
+    to be asking about. She may be in the tree, or still in this contributor's
+    basket — both count, because making somebody wait for an admin before they
+    can name their grandmother's parents is how a session ends.
+    """
+    target = name.casefold()
+
+    for payload in _basket(context):
+        for entry in payload.get("people") or []:
+            if entry.get("given_name", "").casefold() == target:
+                return {
+                    "person_id": None,
+                    "submission_id": None,
+                    "draft_id": payload.get("_draft_id"),
+                    "label": submissions.person_label(entry),
+                }
+
+    for candidate in await store.subject_candidates(update.effective_user.id):
+        first = (candidate["label"] or "").split()
+        if first and first[0].casefold() == target:
+            return {
+                "person_id": candidate["person_id"],
+                "submission_id": candidate["submission_id"],
+                "draft_id": None,
+                "label": candidate["label"],
+            }
+    return None
+
+
 async def _absorb_dictation(
     update: Update, context: ContextTypes.DEFAULT_TYPE, reading: dictation.Reading
 ):
@@ -755,6 +789,19 @@ async def _absorb_dictation(
     """
     user_id = update.effective_user.id
     who = await store.contributor_state(user_id)
+
+    lead_extra = ""
+    if reading.subject:
+        found = await _resolve_named_subject(update, context, reading.subject)
+        if found is None:
+            return await _show_menu(
+                update,
+                context,
+                texts.DICTATED_SUBJECT_UNKNOWN.format(name=reading.subject),
+            )
+        _set_cursor(context, found)
+        lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
+
     about = await _subject_of(update, context)
     submitted_by = submissions.submitter(
         user_id, person_id=who["person_id"], label=who["label"]
@@ -775,6 +822,7 @@ async def _absorb_dictation(
             mention.given_name,
             sex=mention.sex,
             family_name=mention.family_name,
+            nickname=mention.nickname,
             notes=mention.note,
         )
 
@@ -826,9 +874,15 @@ async def _absorb_dictation(
         log.warning("dictation rejected for %s: %s", user_id, problem)
         return await _show_menu(update, context, texts.ERROR)
 
-    lead = texts.DICTATED.format(count=len(reading))
-    if any(m.uncertain for m in reading.people):
-        lead += texts.DICTATED_UNSURE
+    lead = texts.DICTATED.format(count=len(reading)) + lead_extra
+    guesses = list(
+        dict.fromkeys(reason for m in reading.people for reason in m.uncertain)
+    )
+    if guesses:
+        template = (
+            texts.DICTATED_UNSURE_ONE if len(guesses) == 1 else texts.DICTATED_UNSURE
+        )
+        lead += template.format(reasons=", and ".join(guesses))
     return await _show_review(update, context, lead)
 
 
@@ -1048,6 +1102,19 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _say(update, texts.HELP)
+
+
+async def on_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """The menu is where people rest, so it is where they start typing."""
+    typed = update.effective_message.text or ""
+    if dictation.looks_like_dictation(typed):
+        reading = dictation.parse(
+            typed, subject_name=_subject_name_or_none(context)
+        )
+        if reading:
+            return await _absorb_dictation(update, context, reading)
+        return await _show_menu(update, context, texts.DICTATED_NOTHING)
+    return await _show_menu(update, context, texts.MENU_TYPE_HINT)
 
 
 async def on_stray_text(update: Update, context: ContextTypes.DEFAULT_TYPE):

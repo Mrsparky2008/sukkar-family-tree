@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS people (
     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
     given_name             TEXT    NOT NULL,
     given_name_ar          TEXT,
+    -- What people actually call them. Migration anglicised half the family:
+    -- Youssef answers to Joe, Hanna to John. Nobody searching for their uncle
+    -- will type the name on his birth certificate.
+    nickname               TEXT,
     family_name            TEXT    NOT NULL,
     sex                    TEXT    CHECK (sex IN ('M', 'F')),
     father_id              INTEGER REFERENCES people(id) ON DELETE SET NULL,
