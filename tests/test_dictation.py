@@ -364,8 +364,11 @@ class MarriagesInsideAListTests(unittest.TestCase):
         )
 
     def test_nobody_is_merged_with_their_own_spouse(self):
-        names = [m.given_name for m in self.reading.people]
-        self.assertNotIn("Youssef Wafaq", " ".join(names))
+        for mention in self.reading.people:
+            self.assertNotIn(
+                "Wafaq", f"{mention.given_name} {mention.family_name or ''}"
+                if mention.given_name != "Wafaq" else ""
+            )
 
     def test_the_nun_remark_stays_on_clemence(self):
         clemence = [m for m in self.reading.people if m.given_name == "Clemence"][0]
