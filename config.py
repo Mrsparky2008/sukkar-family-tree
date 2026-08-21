@@ -198,7 +198,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
 #: The bot's @username, used in the "share this with a relative" message that
 #: gets forwarded around WhatsApp. Without the @.
-TELEGRAM_BOT_USERNAME = "Sukar_bot"
+TELEGRAM_BOT_USERNAME = "Sukkar_family_bot"
 
 #: Telegram users with cross-branch review powers. These are trusted from
 #: config rather than the database so a locked-out super admin can always be
