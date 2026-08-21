@@ -376,6 +376,17 @@ gaps — it never overwrites something an admin already recorded.
 
 ---
 
+## Putting it somewhere
+
+```bash
+cd deploy && terraform init && terraform apply
+```
+
+One small AWS box, about $5 a month: the bot running as a service that
+restarts itself, the database on disk outside the checkout, and a nightly
+backup of both the database and a JSON export to S3. Full instructions in
+`deploy/README.md`.
+
 ## Deployment notes
 
 Secrets come from the environment, never the repo. Copy `.env.example` to

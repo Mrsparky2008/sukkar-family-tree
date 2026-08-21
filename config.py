@@ -200,10 +200,20 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 #: gets forwarded around WhatsApp. Without the @.
 TELEGRAM_BOT_USERNAME = "Sukkar_family_bot"
 
-#: Telegram users with cross-branch review powers. These are trusted from
-#: config rather than the database so a locked-out super admin can always be
-#: restored by editing the environment.
-SUPER_ADMIN_TELEGRAM_IDS = _env_id_list("SUPER_ADMIN_TELEGRAM_IDS")
+#: Telegram users with cross-branch review powers, listed here rather than in
+#: the database so a locked-out super admin can always be restored by editing
+#: a file. A Telegram user ID is not a secret — anyone you message can see
+#: yours — so these live in config, and the environment can add more without
+#: an edit.
+#:
+#: Find an ID by messaging @userinfobot.
+SUPER_ADMINS = [
+    7499537877,  # Steven Sukar
+]
+
+SUPER_ADMIN_TELEGRAM_IDS = list(
+    dict.fromkeys(SUPER_ADMINS + _env_id_list("SUPER_ADMIN_TELEGRAM_IDS"))
+)
 
 #: Step 3. Password for the Flask admin interface.
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
