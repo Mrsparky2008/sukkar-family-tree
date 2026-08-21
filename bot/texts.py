@@ -21,7 +21,7 @@ VILLAGE = config.VILLAGE
 # --- first contact ---------------------------------------------------------
 
 WELCOME = (
-    f"Ahlan wa sahlan.\n\n"
+    f"Welcome.\n\n"
     f"This is the {FAMILY} family tree of {VILLAGE}. Relatives add the names "
     f"they know, someone from your branch checks them, and the tree grows.\n\n"
     f"Two questions and you're in."
