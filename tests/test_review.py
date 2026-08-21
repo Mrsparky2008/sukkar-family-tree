@@ -563,5 +563,151 @@ class SpellingReportTests(ReviewTestCase):
         self.assertIn("one family", output)
 
 
+class ClosenessTests(ReviewTestCase):
+    def test_a_person_is_no_distance_from_themselves(self):
+        self.assertEqual(
+            db.relationship_distance(
+                self.conn, self.ids["khalil_y"], self.ids["khalil_y"]
+            ),
+            0,
+        )
+
+    def test_a_father_is_one_step(self):
+        self.assertEqual(
+            db.relationship_distance(
+                self.conn, self.ids["khalil_y"], self.ids["youssef"]
+            ),
+            1,
+        )
+
+    def test_a_spouse_is_one_step(self):
+        self.assertEqual(
+            db.relationship_distance(
+                self.conn, self.ids["youssef"], self.ids["nada"]
+            ),
+            1,
+        )
+
+    def test_a_brother_is_two_steps(self):
+        self.assertEqual(
+            db.relationship_distance(
+                self.conn, self.ids["khalil_y"], self.ids["georges"]
+            ),
+            2,
+        )
+
+    def test_a_cousin_is_further_than_a_sibling(self):
+        cousin = db.relationship_distance(
+            self.conn, self.ids["georges"], self.ids["antoun"]
+        )
+        sibling = db.relationship_distance(
+            self.conn, self.ids["khalil_y"], self.ids["georges"]
+        )
+        self.assertGreater(cousin, sibling)
+
+    def test_marrying_your_cousin_makes_you_close_by_two_routes(self):
+        """Not a quirk — it is the reason this is a graph.
+
+        Mariam and Khalil married, and they are also cousins. The marriage is
+        the shorter path, so they come out one step apart. A tree structure
+        could not hold both facts at once.
+        """
+        self.assertEqual(
+            db.relationship_distance(
+                self.conn, self.ids["mariam"], self.ids["khalil_a"]
+            ),
+            1,
+        )
+        ancestors = db.get_ancestors(self.conn, self.ids["joseph"])
+        self.assertIn(self.ids["youssef"], ancestors)
+        self.assertIn(self.ids["boutros"], ancestors)
+
+    def test_somebody_unconnected_has_no_distance(self):
+        stranger = db.create_person(self.conn, "Zaher", sex="M")
+        self.assertIsNone(
+            db.relationship_distance(self.conn, stranger, self.ids["khalil_y"])
+        )
+
+    def test_closeness_reads_as_a_sentence(self):
+        self.assertEqual(db.closeness(0), "themselves")
+        self.assertIn("parent", db.closeness(1))
+        self.assertIn("not connected", db.closeness(None))
+
+
+class ProvenanceTests(ReviewTestCase):
+    """Who says so, and how would they know?"""
+
+    def claim_about(self, person_id, teller_person_id, teller_user, label, **extra):
+        payload = S.build(
+            S.ADD_SIBLING,
+            submitted_by=S.submitter(teller_user, teller_person_id, label),
+            about=S.subject(person_id=self.ids["khalil_y"], label="Khalil"),
+            people=[S.person(S.SIBLING, "Georges", sex="M")],
+            **extra,
+        )
+        submission_id = db.add_submission(self.conn, teller_user, payload)
+        db.resolve_submission(
+            self.conn, submission_id, "merged", 1, resulting_person_id=person_id
+        )
+        return submission_id
+
+    def test_every_claim_is_kept_with_who_made_it(self):
+        georges = self.ids["georges"]
+        self.claim_about(georges, self.ids["khalil_y"], 111, "Khalil")
+        self.claim_about(georges, self.ids["mariam"], 222, "Mariam")
+
+        claims = db.provenance(self.conn, georges)
+        self.assertEqual(len(claims), 2)
+        self.assertEqual(
+            {c["told_by"] for c in claims}, {"Khalil", "Mariam"}
+        )
+
+    def test_the_closest_teller_comes_first(self):
+        """A brother sorts above a niece. It is an ordering, not a ruling."""
+        georges = self.ids["georges"]
+        self.claim_about(georges, self.ids["mariam"], 222, "Mariam")
+        self.claim_about(georges, self.ids["khalil_y"], 111, "Khalil")
+
+        claims = db.provenance(self.conn, georges)
+        self.assertEqual(claims[0]["told_by"], "Khalil")
+        self.assertLess(claims[0]["distance"], claims[1]["distance"])
+
+    def test_second_hand_knowledge_is_recorded_as_such(self):
+        georges = self.ids["georges"]
+        self.claim_about(
+            georges, self.ids["khalil_y"], 111, "Khalil", source="his mother Nada"
+        )
+        self.assertEqual(
+            db.provenance(self.conn, georges)[0]["heard_from"], "his mother Nada"
+        )
+
+    def test_a_teller_with_no_place_in_the_tree_sorts_last(self):
+        georges = self.ids["georges"]
+        self.claim_about(georges, None, 333, "someone new")
+        self.claim_about(georges, self.ids["khalil_y"], 111, "Khalil")
+
+        claims = db.provenance(self.conn, georges)
+        self.assertEqual(claims[0]["told_by"], "Khalil")
+        self.assertIsNone(claims[-1]["distance"])
+
+    def test_approving_never_erases_what_was_submitted(self):
+        """The whole model rests on this: claims are append-only."""
+        georges = self.ids["georges"]
+        submission_id = self.claim_about(
+            georges, self.ids["khalil_y"], 111, "Khalil"
+        )
+        before = db.get_submission(self.conn, submission_id)["payload_json"]
+
+        # A second, contradicting claim.
+        self.claim_about(georges, self.ids["mariam"], 222, "Mariam")
+
+        after = db.get_submission(self.conn, submission_id)["payload_json"]
+        self.assertEqual(after, before)
+        self.assertEqual(len(db.provenance(self.conn, georges)), 2)
+
+    def test_a_hand_seeded_person_has_no_claims_and_that_is_fine(self):
+        self.assertEqual(db.provenance(self.conn, self.ids["elias"]), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

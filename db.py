@@ -1166,6 +1166,127 @@ def corroborate(
 
 
 # ===========================================================================
+# Provenance
+# ===========================================================================
+#
+# Every claim anyone has made is kept forever, with who made it. Nothing is
+# ever overwritten — an approval writes a person, but the submission that
+# produced it stays exactly as it was sent.
+#
+# That is what makes the question "who says so, and how would they know?"
+# answerable later from data captured today. Closeness is the usual answer to
+# the second half: a son knows his own father better than a cousin does. This
+# module works that out and reports it. It never decides.
+# ===========================================================================
+
+
+def relationship_distance(
+    conn: sqlite3.Connection, a: int, b: int, limit: int = 8
+) -> int | None:
+    """Steps between two people through parents, children and marriages.
+
+    0 is the same person, 1 a parent, child or spouse, 2 a sibling or
+    grandparent, and so on. None means further apart than `limit`, or not
+    connected at all.
+    """
+    if a == b:
+        return 0
+
+    seen = {a}
+    frontier = [a]
+    for step in range(1, limit + 1):
+        following: list[int] = []
+        for person_id in frontier:
+            neighbours: set[int] = set()
+            row = conn.execute(
+                "SELECT father_id, mother_id FROM people WHERE id = ?", (person_id,)
+            ).fetchone()
+            if row is not None:
+                neighbours.update(
+                    parent for parent in (row["father_id"], row["mother_id"]) if parent
+                )
+            neighbours.update(
+                child["id"] for child in get_children(conn, person_id)
+            )
+            neighbours.update(
+                partner["id"] for partner in get_partners(conn, person_id)
+            )
+
+            for neighbour in neighbours:
+                if neighbour == b:
+                    return step
+                if neighbour not in seen:
+                    seen.add(neighbour)
+                    following.append(neighbour)
+        if not following:
+            return None
+        frontier = following
+    return None
+
+
+#: How a distance reads in a sentence, for the review screen.
+_CLOSENESS = {
+    0: "themselves",
+    1: "a parent, child or spouse",
+    2: "a sibling, grandparent or grandchild",
+    3: "a niece, nephew, aunt or uncle",
+    4: "a first cousin",
+}
+
+
+def closeness(distance: int | None) -> str:
+    if distance is None:
+        return "not connected in the tree yet"
+    return _CLOSENESS.get(distance, f"{distance} steps away")
+
+
+def provenance(conn: sqlite3.Connection, person_id: int) -> list[dict[str, Any]]:
+    """Everything anyone has said about this person, closest teller first.
+
+    Ordering by closeness is not a ruling. It is the order a human would want
+    to read them in, because the person nearest to the subject usually knows
+    best — and when they do not, seeing both claims side by side is the only
+    way anyone finds out.
+    """
+    claims: list[dict[str, Any]] = []
+
+    for row in conn.execute(
+        "SELECT * FROM submissions WHERE resulting_person_id = ? ORDER BY id",
+        (person_id,),
+    ):
+        payload = submission_payload(row)
+        teller = payload.get("submitted_by") or {}
+        teller_id = teller.get("person_id")
+        distance = (
+            relationship_distance(conn, teller_id, person_id)
+            if teller_id is not None
+            else None
+        )
+        claims.append(
+            {
+                "submission_id": row["id"],
+                "status": row["status"],
+                "when": row["created_at"],
+                "claim": payload,
+                "told_by": teller.get("label")
+                or f"telegram {row['telegram_user_id']}",
+                "told_by_person_id": teller_id,
+                "heard_from": payload.get("source"),
+                "distance": distance,
+                "closeness": closeness(distance),
+            }
+        )
+
+    claims.sort(
+        key=lambda claim: (
+            claim["distance"] if claim["distance"] is not None else 99,
+            claim["submission_id"],
+        )
+    )
+    return claims
+
+
+# ===========================================================================
 # Integrity
 # ===========================================================================
 

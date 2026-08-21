@@ -323,6 +323,42 @@ approving something that scores 0.9 or higher against an existing person is
 refused until the reviewer says which they meant, because one tired tap
 otherwise creates a second Youssef and moves his son onto the copy.
 
+## Who says so, and how would they know?
+
+Every claim anyone makes is kept forever, with who made it. Nothing is ever
+overwritten: approving a submission writes a person, but the submission that
+produced it stays exactly as it was sent. Two relatives who disagree both stay
+on the record.
+
+```bash
+python review.py --who 12
+```
+
+```
+#12  Hanna Najib Sukkar
+  parents:  Najib Sukkar
+  children: Jason Hanna Sukkar
+
+  Where this came from, closest teller first:
+      #2  Hanna (Johnny) as father of Jason
+          told by Jason Hanna Sukkar — a parent, child or spouse,
+          who heard it from his mother Therese  [merged]
+      #1  Hanna (John) as brother of Wadiha
+          told by Steven Kalim Sukkar — a niece, nephew, aunt or uncle  [merged]
+
+  If these disagree, Jason Hanna Sukkar is the closest to them
+  — but that is a hint, not a ruling.
+```
+
+Closeness is counted through the graph — parents, children and marriages —
+so a son sorts above a cousin without anyone configuring that. It is an
+ordering, never a decision: a human picks, and the losing claim stays
+readable.
+
+Because claims are append-only, that choice can be made or remade at any
+point in the future from information captured today. Which is the whole
+reason the queue never edits anything in place.
+
 ## Reviewing
 
 ```bash

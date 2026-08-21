@@ -398,6 +398,55 @@ def show_spellings(conn: sqlite3.Connection) -> None:
         )
 
 
+def show_person(conn: sqlite3.Connection, person_id: int) -> None:
+    """Drill down: who this person is, and who says so."""
+    person = db.get_person(conn, person_id)
+    if person is None:
+        print(f"no person #{person_id}", file=sys.stderr)
+        return
+
+    print(f"\n#{person_id}  {db.display_name_with_spellings(conn, person)}")
+    if person["also_known_as"]:
+        print(f"  also known as {person['also_known_as']}")
+
+    parents = db.get_parents(conn, person_id)
+    if parents:
+        print(f"  parents:  {', '.join(db.row_display_name(p) for p in parents)}")
+    partners = db.get_partners(conn, person_id)
+    if partners:
+        print(f"  married:  {', '.join(db.row_display_name(p) for p in partners)}")
+    children = db.get_children(conn, person_id)
+    if children:
+        print(f"  children: {', '.join(db.row_display_name(c) for c in children)}")
+    if person["notes"]:
+        print(f"  notes:    {person['notes']}")
+
+    show_spelling_claims(conn, person_id)
+
+    claims = db.provenance(conn, person_id)
+    if not claims:
+        print("\n  Nobody has submitted anything about them — seeded by hand.\n")
+        return
+
+    print("\n  Where this came from, closest teller first:")
+    for claim in claims:
+        print(
+            f"      #{claim['submission_id']}  {submissions.describe(claim['claim'])}"
+        )
+        line = f"          told by {claim['told_by']} — {claim['closeness']}"
+        if claim["heard_from"]:
+            line += f", who heard it from {claim['heard_from']}"
+        print(f"{line}  [{claim['status']}]")
+
+    closest = claims[0]
+    if len(claims) > 1 and closest["distance"] is not None:
+        print(
+            f"\n  If these disagree, {closest['told_by']} is the closest to them"
+            f" — but that is a hint, not a ruling."
+        )
+    print()
+
+
 def show_tree(conn: sqlite3.Connection) -> None:
     people = db.get_people(conn)
     print(f"\n{len(people)} people, {len(db.get_unions(conn))} unions\n")
@@ -427,6 +476,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--anyway", action="store_true",
                         help="approve even though it looks like a duplicate")
     parser.add_argument("--tree", action="store_true")
+    parser.add_argument("--who", type=int, metavar="PERSON_ID",
+                        help="drill down: who they are and who says so")
     parser.add_argument("--spellings", action="store_true",
                         help="where each spelling of the family name split off")
     parser.add_argument("--as", dest="reviewer", type=int, default=0,
@@ -438,7 +489,9 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db(conn)
 
     try:
-        if args.spellings:
+        if args.who is not None:
+            show_person(conn, args.who)
+        elif args.spellings:
             show_spellings(conn)
         elif args.tree:
             show_tree(conn)
