@@ -177,10 +177,37 @@ And how do you spell your family name?
    [ Sukkar ] [ Sukar ] [ Succar ] [ Soukkar ] [ Something else ]
 ```
 
-Each person keeps their own spelling. `db.canonical_family_name()` folds all
-of them onto one form for matching, so a Succar in Sydney and a Soukkar in
-São Paulo still corroborate each other rather than fragmenting into separate
-families. The list lives in `config.FAMILY_NAME_VARIANTS`.
+Each person keeps their own spelling. Every spelling folds onto one canonical
+form for matching and for branch grouping, so a Succar in Sydney and a
+Soukkar in Beirut corroborate each other rather than fragmenting into
+separate families. **A different spelling never means a different branch.**
+
+The configured list is a starting point, not a limit. A relative who signs up
+with a spelling nobody listed is answering "how do you spell *our* family
+name", so that answer is learned as a variant and folds from then on — the
+`family_variants` table. A family name collected anywhere else, like a
+mother's maiden name, is a different family and is never learned.
+
+This matters because the same man's descendants can be spelled one way on an
+Australian passport and another way on the Lebanese records.
+
+### Where a spelling split off
+
+```bash
+python review.py --spellings
+```
+
+```
+Sukar  —  4 people
+    splits from Succar at Kalim Semaan Sukar — 3 descendant(s) carry it
+      (father Semaan Succar spells it Succar)
+
+All of the above are one family. Spelling differences are
+transliteration, not descent — matching folds them together.
+```
+
+Usually one clerk, at one border, on one day — and everyone below that person
+inherits it.
 
 ## Nothing is confirmed one name at a time
 

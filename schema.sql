@@ -37,6 +37,33 @@ CREATE TABLE IF NOT EXISTS branches (
 
 
 -- ---------------------------------------------------------------------------
+-- family_variants — the spellings that are all one family
+--
+-- Arabic transliteration was never standardised, so a family that left the
+-- village once reaches four countries spelled four ways, decided by whichever
+-- clerk filled in the form. A branch can even be spelled one way on an
+-- Australian passport and another way on the Lebanese records for the same
+-- man.
+--
+-- Those are not different families and must never be matched as if they were.
+-- Every spelling folds onto one canonical form for matching and branching,
+-- while each person keeps the spelling that is actually on their documents.
+--
+-- Seeded from config.FAMILY_NAME_VARIANTS, and added to when a relative signs
+-- up with a spelling nobody has listed yet — at that point in the
+-- conversation they are answering "how do you spell OUR family name", so the
+-- answer is a variant by definition.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS family_variants (
+    spelling   TEXT PRIMARY KEY,
+    canonical  TEXT NOT NULL,
+    source     TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+
+-- ---------------------------------------------------------------------------
 -- people — the nodes
 --
 -- `given_name` is the first name only. The full display name is NEVER stored:

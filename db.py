@@ -74,6 +74,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
     # executescript ends the implicit transaction; re-assert the pragma.
     conn.execute("PRAGMA foreign_keys = ON")
+    sync_family_variants(conn)
     conn.commit()
 
 
@@ -724,27 +725,79 @@ def admin_branch_ids(
 # ===========================================================================
 
 
-def canonical_family_name(family_name: str | None) -> str:
+def sync_family_variants(conn: sqlite3.Connection) -> None:
+    """Put the configured spellings in the table. Safe to re-run."""
+    for spelling in config.FAMILY_NAME_VARIANTS:
+        conn.execute(
+            "INSERT OR IGNORE INTO family_variants (spelling, canonical, source)"
+            " VALUES (?, ?, 'config')",
+            (spelling, config.FAMILY_NAME),
+        )
+
+
+def record_family_variant(
+    conn: sqlite3.Connection, spelling: str | None, source: str = "self-reported"
+) -> None:
+    """Learn a spelling of the family name we had not seen before.
+
+    Only ever called for a name given in answer to "how do you spell your
+    family name" during signup. A family name collected anywhere else — a
+    mother's maiden name, a wife's — is a different family and must not land
+    here.
+    """
+    if not spelling or not spelling.strip():
+        return
+    conn.execute(
+        "INSERT OR IGNORE INTO family_variants (spelling, canonical, source)"
+        " VALUES (?, ?, ?)",
+        (spelling.strip(), config.FAMILY_NAME, source),
+    )
+
+
+def known_family_variants(conn: sqlite3.Connection | None = None) -> set[str]:
+    """Every spelling that counts as this family, folded to lowercase."""
+    variants = {v.casefold() for v in config.FAMILY_NAME_VARIANTS}
+    variants.add(config.FAMILY_NAME.casefold())
+    if conn is not None:
+        try:
+            variants.update(
+                row["spelling"].casefold()
+                for row in conn.execute("SELECT spelling FROM family_variants")
+            )
+        except sqlite3.OperationalError:
+            # Table not created yet — config alone is a fine answer.
+            pass
+    return variants
+
+
+def canonical_family_name(
+    family_name: str | None, conn: sqlite3.Connection | None = None
+) -> str:
     """Fold a spelling variant onto the family's canonical form.
 
-    Arabic transliteration is not standardised, so the same family reaches
-    four countries spelled four ways. Those spellings are one family: matching
-    has to see them as the same, while display must not. The variants live in
-    config.FAMILY_NAME_VARIANTS. A name that is not one of them comes back as
+    Every known spelling answers to one canonical name for matching and for
+    branch grouping, while `people.family_name` keeps whatever is actually on
+    that person's documents. A name that is not a known variant comes back as
     given — someone who married in keeps their own family name.
+
+    Pass `conn` to include spellings learned from relatives signing up.
     """
     if not family_name:
         return config.FAMILY_NAME
     cleaned = family_name.strip()
-    for variant in config.FAMILY_NAME_VARIANTS:
-        if variant.casefold() == cleaned.casefold():
-            return config.FAMILY_NAME
+    if cleaned.casefold() in known_family_variants(conn):
+        return config.FAMILY_NAME
     return cleaned
 
 
-def same_family(a: str | None, b: str | None) -> bool:
+def same_family(
+    a: str | None, b: str | None, conn: sqlite3.Connection | None = None
+) -> bool:
     """Whether two family names are the same family, spelling aside."""
-    return canonical_family_name(a).casefold() == canonical_family_name(b).casefold()
+    return (
+        canonical_family_name(a, conn).casefold()
+        == canonical_family_name(b, conn).casefold()
+    )
 
 
 def name_similarity(a: str, b: str) -> float:
@@ -860,6 +913,7 @@ def corroborate(
     conn: sqlite3.Connection,
     given_name: str,
     role: str | None = None,
+    family_name: str | None = None,
     subject_person_id: int | None = None,
     subject_submission_id: int | None = None,
     father_given_name: str | None = None,
@@ -909,6 +963,13 @@ def corroborate(
             # A shared relative outweighs a shaky spelling: "Khaleel, brother
             # of the same man" is the same person as "Khalil".
             score = 0.5 + 0.5 * score
+
+        if family_name and row["family_name"]:
+            if not same_family(family_name, row["family_name"], conn):
+                # Genuinely different families — a Karam who married in is not
+                # a candidate. Spelling variants of our own name are NOT this
+                # case; same_family() folds those together first.
+                score *= 0.6
 
         if score >= cutoff:
             results.append(

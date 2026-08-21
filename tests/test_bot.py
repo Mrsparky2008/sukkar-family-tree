@@ -237,6 +237,63 @@ class FamilyNameTests(BotTestCase):
         self.assertEqual(db.canonical_family_name("Karam"), "Karam")
         self.assertFalse(db.same_family("Karam", config.FAMILY_NAME))
 
+    async def test_an_unlisted_spelling_becomes_a_known_variant(self):
+        """All of them are one family, including spellings nobody listed."""
+        conn = db.connect()
+        try:
+            self.assertNotEqual(
+                db.canonical_family_name("Soukar", conn), config.FAMILY_NAME
+            )
+        finally:
+            conn.close()
+
+        chat = Conversation(user_id=5103)
+        await chat.start()
+        await chat.say("Steven")
+        await chat.tap(texts.FAMILY_OTHER)
+        await chat.say("Soukar")
+        await chat.say("Kalim")
+
+        conn = db.connect()
+        try:
+            self.assertEqual(
+                db.canonical_family_name("Soukar", conn), config.FAMILY_NAME
+            )
+            self.assertTrue(db.same_family("Soukar", "Succar", conn))
+        finally:
+            conn.close()
+
+    async def test_a_mothers_maiden_name_is_never_learned_as_a_variant(self):
+        """Only the "how do you spell OUR name" answer counts."""
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("Nada")
+        await chat.say("Karam")
+        await self.send_basket(chat)
+
+        conn = db.connect()
+        try:
+            self.assertEqual(db.canonical_family_name("Karam", conn), "Karam")
+        finally:
+            conn.close()
+
+    async def test_a_different_family_scores_lower(self):
+        conn = db.connect()
+        try:
+            same = db.corroborate(
+                conn, "Georges", role="sibling",
+                subject_person_id=self.ids["khalil_y"],
+                family_name="Succar", threshold=0.0,
+            )
+            other = db.corroborate(
+                conn, "Georges", role="sibling",
+                subject_person_id=self.ids["khalil_y"],
+                family_name="Karam", threshold=0.0,
+            )
+        finally:
+            conn.close()
+        self.assertGreater(same[0]["score"], other[0]["score"])
+
 
 # ===========================================================================
 # The menu and the cursor

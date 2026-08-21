@@ -161,6 +161,14 @@ def _queue(
     contributor = db.get_contributor(conn, telegram_user_id)
     branch_id = contributor["branch_id"] if contributor else None
 
+    if payload.get("kind") == submissions.IDENTIFY:
+        # They were answering "how do you spell your family name", so whatever
+        # they said is a spelling of this family — including one nobody has
+        # listed. Learning it now means the next relative who spells it that
+        # way corroborates instead of looking like a stranger.
+        for entry in payload.get("people") or []:
+            db.record_family_variant(conn, entry.get("family_name"))
+
     matched_person_id = None
     best = None
     entry = submissions.primary_person(payload)
@@ -173,6 +181,7 @@ def _queue(
             conn,
             entry["given_name"],
             role=entry.get("role"),
+            family_name=entry.get("family_name"),
             subject_person_id=about.get("person_id"),
             subject_submission_id=about.get("submission_id"),
             father_given_name=entry.get("father_given_name"),

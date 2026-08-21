@@ -255,6 +255,7 @@ def evidence(
         conn,
         entry["given_name"],
         role=entry.get("role"),
+        family_name=entry.get("family_name"),
         subject_person_id=about.get("person_id"),
         subject_submission_id=about.get("submission_id"),
         father_given_name=entry.get("father_given_name"),
@@ -305,6 +306,81 @@ def show_one(conn: sqlite3.Connection, submission_id: int) -> None:
     print()
 
 
+def show_spellings(conn: sqlite3.Connection) -> None:
+    """Where each spelling of the family name starts, and who inherited it.
+
+    A spelling is not a branch. It is usually one clerk at one border on one
+    day, and everything below that person carries it. Showing the divergence
+    point makes that visible: a line spelled differently in Australia and in
+    Lebanon is still one man's descendants.
+    """
+    people = {row["id"]: row for row in db.get_people(conn)}
+    ours = {
+        person_id: row
+        for person_id, row in people.items()
+        if db.canonical_family_name(row["family_name"], conn) == config.FAMILY_NAME
+    }
+    if not ours:
+        print("\nNobody in the family yet.\n")
+        return
+
+    children: dict[int, list[int]] = {}
+    for person_id, row in people.items():
+        for parent in (row["father_id"], row["mother_id"]):
+            if parent is not None:
+                children.setdefault(parent, []).append(person_id)
+
+    def descendants(person_id: int) -> int:
+        seen: set[int] = set()
+        frontier = [person_id]
+        while frontier:
+            current = frontier.pop()
+            for child in children.get(current, ()):
+                if child not in seen:
+                    seen.add(child)
+                    frontier.append(child)
+        return len(seen)
+
+    spellings: dict[str, list] = {}
+    for person_id, row in ours.items():
+        spellings.setdefault(row["family_name"], []).append(person_id)
+
+    print(f"\n{len(spellings)} spelling(s) of {config.FAMILY_NAME} in the tree\n")
+
+    for spelling, members in sorted(
+        spellings.items(), key=lambda item: -len(item[1])
+    ):
+        print(f"  {spelling}  —  {len(members)} people")
+
+        for person_id in sorted(members):
+            row = ours[person_id]
+            father = people.get(row["father_id"]) if row["father_id"] else None
+            if father is None:
+                if row["father_id"] is None:
+                    print(
+                        f"      starts at {db.row_display_name(row)} "
+                        f"(no father recorded)"
+                    )
+                continue
+            if father["family_name"] != spelling:
+                print(
+                    f"      splits from {father['family_name']} at "
+                    f"{db.row_display_name(row)} "
+                    f"— {descendants(person_id)} descendant(s) carry it"
+                )
+                print(
+                    f"        (father {db.row_display_name(father)} "
+                    f"spells it {father['family_name']})"
+                )
+        print()
+
+    if len(spellings) > 1:
+        print(
+            "  All of the above are one family. Spelling differences are\n"
+            "  transliteration, not descent — matching folds them together.\n"
+        )
+
+
 def show_tree(conn: sqlite3.Connection) -> None:
     people = db.get_people(conn)
     print(f"\n{len(people)} people, {len(db.get_unions(conn))} unions\n")
@@ -334,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--anyway", action="store_true",
                         help="approve even though it looks like a duplicate")
     parser.add_argument("--tree", action="store_true")
+    parser.add_argument("--spellings", action="store_true",
+                        help="where each spelling of the family name split off")
     parser.add_argument("--as", dest="reviewer", type=int, default=0,
                         help="your Telegram id, for the audit trail")
     parser.add_argument("--db")
@@ -343,7 +421,9 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db(conn)
 
     try:
-        if args.tree:
+        if args.spellings:
+            show_spellings(conn)
+        elif args.tree:
             show_tree(conn)
         elif args.show is not None:
             show_one(conn, args.show)

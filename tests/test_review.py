@@ -345,5 +345,51 @@ class NothingIsAutomaticTests(ReviewTestCase):
         self.assertEqual(db.count_people(self.conn), before)
 
 
+class SpellingReportTests(ReviewTestCase):
+    """A spelling is a border crossing, not a branch."""
+
+    def build_split_line(self):
+        semaan = db.create_person(self.conn, "Semaan", sex="M", family_name="Succar")
+        kalim = db.create_person(
+            self.conn, "Kalim", sex="M", family_name="Sukar", father_id=semaan
+        )
+        for name in ("Steven", "Tony"):
+            db.create_person(
+                self.conn, name, sex="M", family_name="Sukar", father_id=kalim
+            )
+        return semaan, kalim
+
+    def test_every_spelling_is_still_one_family(self):
+        self.build_split_line()
+        for spelling in ("Succar", "Sukar", config.FAMILY_NAME):
+            self.assertEqual(
+                db.canonical_family_name(spelling, self.conn), config.FAMILY_NAME
+            )
+
+    def test_the_divergence_point_is_findable(self):
+        _semaan, kalim = self.build_split_line()
+        people = {row["id"]: row for row in db.get_people(self.conn)}
+        splits = [
+            person_id
+            for person_id, row in people.items()
+            if row["father_id"]
+            and people[row["father_id"]]["family_name"] != row["family_name"]
+        ]
+        self.assertEqual(splits, [kalim])
+
+    def test_the_report_runs_and_names_the_split(self):
+        import io
+        from contextlib import redirect_stdout
+
+        self.build_split_line()
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            review.show_spellings(self.conn)
+        output = buffer.getvalue()
+        self.assertIn("Sukar", output)
+        self.assertIn("splits from Succar", output)
+        self.assertIn("one family", output)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
