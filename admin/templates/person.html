@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ display }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h2>{{ display }} <span class="idtag">#{{ person.id }}</span></h2>
+  {% if person.also_known_as %}<p class="meta">known as {{ person.also_known_as }}</p>{% endif %}
+  {% if person.notes %}<p class="meta">{{ person.notes }}</p>{% endif %}
+
+  {% for title, rows in relatives.items() %}
+    {% if rows %}
+      <div class="label">{{ title }}</div>
+      {% for pid, name in rows %}
+        <a href="{{ url_for('person', person_id=pid) }}">{{ name }}</a>
+        <span class="idtag">#{{ pid }}</span><br>
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+
+  {% if claims %}
+    <div class="label">Where this came from — closest teller first</div>
+    {% for claim in claims %}
+      <div class="match">
+        <b>{{ claim.told_by }}</b> — {{ claim.closeness }}
+        {% if claim.heard_from %}, who heard it from {{ claim.heard_from }}{% endif %}
+        <br>said: {{ claim.claim | describe }}
+        <span class="idtag">[{{ claim.status }}]</span>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="meta">Nobody has submitted anything about them — seeded by hand.</p>
+  {% endif %}
+</div>
+{% endblock %}

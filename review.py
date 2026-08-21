@@ -105,6 +105,7 @@ def approve(
     reviewed_by: int,
     use_person_id: int | None = None,
     force: bool = False,
+    edits: dict[int, dict[str, Any]] | None = None,
 ) -> list[int]:
     """Turn a submission into people and links. Returns the ids created.
 
@@ -121,6 +122,21 @@ def approve(
 
     payload = db.submission_payload(row)
     kind = payload.get("kind")
+
+    # Edit-then-approve. The admin's fix is applied to what gets created,
+    # never to the stored submission — the original stays exactly as sent,
+    # which is the whole provenance model. `edits` maps a person's index in
+    # the payload to replacement fields.
+    if edits:
+        editable = {"given_name", "family_name", "given_name_ar",
+                    "also_known_as", "sex", "notes"}
+        for index, fields in edits.items():
+            if 0 <= index < len(payload.get("people") or []):
+                for name, value in fields.items():
+                    if name in editable:
+                        payload["people"][index][name] = (
+                            value.strip() if isinstance(value, str) else value
+                        ) or None
 
     if kind == submissions.CORRECTION:
         raise Blocked(
@@ -231,7 +247,8 @@ def approve(
             reviewed_by,
             resulting_person_id=primary,
             review_note=(
-                f"same as #{use_person_id}" if use_person_id is not None else None
+                f"same as #{use_person_id}" if use_person_id is not None
+                else ("approved with edits" if edits else None)
             ),
         )
         db.assign_branches(conn)

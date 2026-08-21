@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Find{% endblock %}
+{% block body %}
+<form method="get" class="inline" style="margin-block-end:1rem">
+  <input type="search" name="q" value="{{ q }}" placeholder="name or number"
+         autofocus style="width:16rem">
+  <button class="btn" type="submit">Find</button>
+</form>
+{% if q and not hits %}<p class="empty">Nobody matching “{{ q }}”.</p>{% endif %}
+{% for pid, name, parents in hits %}
+  <div class="card">
+    <a href="{{ url_for('person', person_id=pid) }}"><b>{{ name }}</b></a>
+    <span class="idtag">#{{ pid }}</span>
+    {% if parents %}<span class="meta"> — child of {{ parents }}</span>{% endif %}
+  </div>
+{% endfor %}
+{% endblock %}

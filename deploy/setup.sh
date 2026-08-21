@@ -48,6 +48,13 @@ if [ ! -f "$APP/.env" ]; then
 # line, then: sudo systemctl restart family-tree
 TELEGRAM_BOT_TOKEN=
 
+# Password for the review interface. Pick one and share it with your branch
+# admins; their Telegram ID decides what each of them can see.
+ADMIN_PASSWORD=
+
+# Signs the review interface's login sessions. Generated at setup.
+SECRET_KEY=$(openssl rand -hex 32)
+
 FAMILY_TREE_DB=$DATA/family.db
 
 # Written by setup.sh so nightly backups can reach S3.
@@ -89,6 +96,36 @@ systemctl enable family-tree
 # a loop until somebody logs in.
 if grep -q '^TELEGRAM_BOT_TOKEN=.\+' "$APP/.env"; then
   systemctl restart family-tree
+fi
+
+# --- the review interface --------------------------------------------------
+#
+# Bound to localhost only: reviewers reach it over an SSH tunnel, so there is
+# no public port, no TLS certificate, and nothing for the internet to find.
+#
+#   ssh -L 8080:localhost:8080 admin@<server>   then  http://localhost:8080
+
+cat > /etc/systemd/system/family-tree-admin.service <<UNIT
+[Unit]
+Description=Family tree review interface
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=$APP
+EnvironmentFile=$APP/.env
+ExecStart=$APP/.venv/bin/python -m admin
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+systemctl daemon-reload
+systemctl enable family-tree-admin
+if grep -q '^ADMIN_PASSWORD=.\+' "$APP/.env"; then
+  systemctl restart family-tree-admin
 fi
 
 # --- backups ---------------------------------------------------------------

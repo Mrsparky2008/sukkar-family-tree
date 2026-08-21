@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Queue{% endblock %}
+{% block body %}
+<div class="statusrow">
+  {% for s in ("pending", "approved", "merged", "rejected", "all") %}
+    <a href="{{ url_for('queue', status=s) }}"
+       {% if s == status %}aria-current="page"{% endif %}>{{ s }}</a>
+  {% endfor %}
+  <span class="meta" style="margin-inline-start:auto">
+    signed in as {{ admin_id }}{% if super_admin %} · super admin{% endif %}
+  </span>
+</div>
+
+{% if not items %}
+  <p class="empty">Nothing {{ status if status != 'all' else 'here' }}. </p>
+{% endif %}
+
+{% for item in items %}
+<div class="card">
+  <h2>#{{ item.id }} <span class="idtag">{{ item.when }}</span></h2>
+  <p style="margin:.3rem 0 .1rem">{{ item.summary }}</p>
+  {% for line in item.details %}<p class="meta" style="margin:.1rem 0">{{ line }}</p>{% endfor %}
+  <p class="meta" style="margin:.3rem 0 0">
+    from <b>{{ item.teller }}</b>{% if item.source %}, who heard it from {{ item.source }}{% endif %}
+  </p>
+  {% if item.note %}<p class="match">“{{ item.note }}”</p>{% endif %}
+
+  {% for match in item.matches %}
+    <div class="match">
+      might already be
+      {% if match.person_id %}
+        <b><a href="{{ url_for('person', person_id=match.person_id) }}">{{ match.label }}</a></b>
+        <span class="idtag">#{{ match.person_id }}</span>
+        {% if match.parents %} — child of {{ match.parents }}{% endif %}
+      {% else %}
+        <b>{{ match.label }}</b> (another pending submission, #{{ match.id }})
+      {% endif %}
+      {% if match.reasons %}<span class="why">— {{ match.reasons | join(", ") }}</span>{% endif %}
+      <span class="idtag">{{ "%.0f" | format(match.score * 100) }}%</span>
+    </div>
+  {% endfor %}
+
+  {% if item.status == "pending" %}
+  <div class="actions">
+    <form method="post" action="{{ url_for('approve', submission_id=item.id) }}" class="inline">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <button class="btn primary" type="submit">Approve</button>
+    </form>
+
+    {% if item.matches %}
+    <form method="post" action="{{ url_for('merge', submission_id=item.id) }}" class="inline">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      {% set best = item.matches | selectattr("person_id") | first %}
+      <input type="number" name="into" style="width:6rem"
+             value="{{ best.person_id if best else '' }}" placeholder="person #">
+      <button class="btn" type="submit">Same person — merge</button>
+    </form>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('reject', submission_id=item.id) }}" class="inline">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="text" name="note" placeholder="why not" style="width:10rem">
+      <button class="btn danger" type="submit">Reject</button>
+    </form>
+
+    <form method="post" action="{{ url_for('approve', submission_id=item.id) }}" class="inline">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      <input type="hidden" name="anyway" value="yes">
+      <button class="btn" type="submit" title="Approve even though it looks like a duplicate">Approve anyway</button>
+    </form>
+  </div>
+
+  {% if item.people %}
+  <details class="edit">
+    <summary>Fix a spelling before approving</summary>
+    <form method="post" action="{{ url_for('approve', submission_id=item.id) }}">
+      <input type="hidden" name="_csrf" value="{{ csrf }}">
+      {% for entry in item.people %}
+      <div>
+        <label>Given name
+          <input type="text" name="edit-{{ loop.index0 }}-given_name"
+                 value="{{ entry.given_name }}"></label>
+        <label>Family name
+          <input type="text" name="edit-{{ loop.index0 }}-family_name"
+                 value="{{ entry.family_name or '' }}"></label>
+        <label>Known as
+          <input type="text" name="edit-{{ loop.index0 }}-also_known_as"
+                 value="{{ entry.also_known_as or '' }}"></label>
+      </div>
+      {% endfor %}
+      <p><button class="btn primary" type="submit">Approve with these fixes</button>
+      <span class="meta">The original submission is kept exactly as sent.</span></p>
+    </form>
+  </details>
+  {% endif %}
+  {% else %}
+    <p class="meta">{{ item.status }}{% if item.review_note %} — {{ item.review_note }}{% endif %}</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

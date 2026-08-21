@@ -7,9 +7,10 @@ public read-only web page.
 Built white-label: everything family-specific lives in `config.py`, so another
 family can fork this repo, edit that one file, and deploy.
 
-> **Status: ready for a pilot.**
-> Foundation, Telegram capture, and a command-line review queue are built and
-> tested. The Flask admin interface and the public Cytoscape view are not.
+> **Status: all four steps built.**
+> Foundation, Telegram capture, the review interface (web and command line),
+> and the public chart. Deployment is one `terraform apply` — see
+> `deploy/README.md`.
 
 ---
 
@@ -108,8 +109,10 @@ review.py       The review queue on the command line. Enough to run a pilot
                 before the Flask interface exists.
 
 bot/            Step 2 — Telegram capture. See bot/README.md.
-admin/          Step 3 — Flask review queue.     Not built.
-web/            Step 4 — Public Cytoscape view.  Not built.
+admin/          Step 3 — the review interface. `python -m admin`, then
+                http://localhost:8080. Same rules as review.py, with buttons.
+web/            Step 4 — the public chart. `python web/build.py` writes one
+                self-contained HTML file.
 ```
 
 ### Schema

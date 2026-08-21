@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Review{% endblock %} · {{ family }} family</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --ground:#e8ecec; --surface:#ffffff; --ink:#141d1b; --muted:#5a6a65;
+  --rule:#c9d3d0; --accent:#2f6b52; --warn:#b8863f; --error:#9c4038;
+  --display:"Spectral",Georgia,serif;
+  --body:"IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0e1513; --surface:#16211f; --ink:#e4ebe8; --muted:#8e9d98;
+    --rule:#2a3835; --accent:#5fa583; --warn:#d0a05c; --error:#c96a60;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0e1513; --surface:#16211f; --ink:#e4ebe8; --muted:#8e9d98;
+  --rule:#2a3835; --accent:#5fa583; --warn:#d0a05c; --error:#c96a60;
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font:15px/1.5 var(--body);
+}
+header {
+  display:flex; flex-wrap:wrap; align-items:baseline; gap:.5rem 1.25rem;
+  padding:.8rem 1.25rem; background:var(--surface);
+  border-bottom:1px solid var(--rule);
+}
+header h1 { font:600 1.15rem var(--display); margin:0; }
+header h1 a { color:inherit; text-decoration:none; }
+header nav { display:flex; gap:1rem; align-items:baseline; margin-inline-start:auto; }
+header a, header button.plain {
+  font:inherit; font-size:.85rem; color:var(--muted); background:none;
+  border:0; padding:0; cursor:pointer; text-decoration:none;
+}
+header a:hover, header button.plain:hover { color:var(--ink); }
+main { max-width:56rem; margin:0 auto; padding:1.25rem; }
+.flash {
+  background:var(--surface); border:1px solid var(--warn);
+  border-inline-start:3px solid var(--warn); border-radius:2px;
+  padding:.6rem .9rem; margin-block-end:1rem; font-size:.9rem;
+  white-space:pre-line;
+}
+.card {
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  padding:1rem 1.1rem; margin-block-end:.9rem;
+}
+.card h2 { font:600 1rem var(--body); margin:0; }
+.idtag { font:400 .75rem var(--mono); color:var(--muted); font-variant-numeric:tabular-nums; }
+.meta { font-size:.8rem; color:var(--muted); }
+.label {
+  font-size:.66rem; font-weight:600; text-transform:uppercase;
+  letter-spacing:.09em; color:var(--muted); margin:.9rem 0 .3rem;
+}
+button, input[type=submit] { font:inherit; }
+.btn {
+  font-size:.85rem; padding:.35rem .8rem; border-radius:2px; cursor:pointer;
+  border:1px solid var(--rule); background:var(--surface); color:var(--ink);
+}
+.btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+:root[data-theme="dark"] .btn.primary, .btn.primary { color:#fff; }
+.btn.danger { color:var(--error); border-color:var(--error); background:transparent; }
+.btn:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+input[type=text], input[type=password], input[type=number], input[type=search] {
+  font:inherit; color:var(--ink); background:var(--ground);
+  border:1px solid var(--rule); border-radius:2px; padding:.35rem .55rem;
+}
+form.inline { display:inline-flex; gap:.4rem; align-items:center; flex-wrap:wrap; }
+.actions { display:flex; gap:.5rem; flex-wrap:wrap; margin-block-start:.8rem; align-items:center; }
+.match {
+  border-inline-start:2px solid var(--rule); padding-inline-start:.7rem;
+  margin-block-start:.5rem; font-size:.85rem; color:var(--muted);
+}
+.match b { color:var(--ink); font-weight:500; }
+.match .why { color:var(--accent); }
+a { color:var(--ink); text-decoration-color:var(--rule); text-underline-offset:3px; }
+a:hover { text-decoration-color:var(--accent); }
+.statusrow { display:flex; gap:.9rem; font-size:.85rem; margin-block-end:1rem; flex-wrap:wrap; }
+.statusrow a[aria-current] { font-weight:600; text-decoration:none; }
+.empty { color:var(--muted); font-style:italic; padding:2rem 0; text-align:center; }
+details.edit summary { cursor:pointer; font-size:.85rem; color:var(--muted); }
+details.edit div { display:flex; gap:.5rem; flex-wrap:wrap; margin-block-start:.5rem; }
+details.edit label { font-size:.75rem; color:var(--muted); display:block; }
+</style>
+</head>
+<body>
+<header>
+  <h1><a href="{{ url_for('queue') }}">{{ family }} family — review</a></h1>
+  {% if session.get('admin_id') %}
+  <nav>
+    <a href="{{ url_for('queue') }}">Queue</a>
+    <a href="{{ url_for('find') }}">Find a person</a>
+    <form method="post" action="{{ url_for('logout') }}" class="inline">
+      <button class="plain" type="submit">Sign out</button>
+    </form>
+  </nav>
+  {% endif %}
+</header>
+<main>
+  {% for message in get_flashed_messages() %}
+    <div class="flash">{{ message }}</div>
+  {% endfor %}
+  {% block body %}{% endblock %}
+</main>
+</body>
+</html>

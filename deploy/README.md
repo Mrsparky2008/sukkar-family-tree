@@ -32,22 +32,47 @@ ssh admin@<that address>
 sudo nano /opt/family-tree/.env
 ```
 
-Three lines to fill in:
+Four lines to fill in:
 
 - `TELEGRAM_BOT_TOKEN=` — from @BotFather
+- `ADMIN_PASSWORD=` — pick one; it opens the review interface
 - `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` — from
   `terraform output -json backup_credentials`
 
 Save, then:
 
 ```bash
-sudo systemctl restart family-tree
+sudo systemctl restart family-tree family-tree-admin
 ```
 
 Message the bot. It should answer.
 
 The token is never in git and never in a chat window. It lives in that one
 file, readable only by root.
+
+## Reviewing from a browser
+
+The review interface never touches the public internet. It listens on
+localhost only, and you reach it through the SSH connection itself:
+
+```bash
+ssh -L 8080:localhost:8080 admin@<server>
+```
+
+Leave that terminal open and browse to **http://localhost:8080**. Sign in
+with the shared password and your Telegram ID — the password opens the door,
+the ID decides which branch's queue you see and goes on the record with every
+decision.
+
+Each pending submission shows who sent it, what they claimed, and who it
+might already be, with the evidence. Four buttons: approve, merge into an
+existing person, reject with a reason, and approve-anyway for when the
+duplicate guard is wrong. "Fix a spelling before approving" applies the
+correction to the person it creates while keeping the submission exactly as
+sent.
+
+Branch admins use the same address and password; their ID scopes them to
+their own branch automatically.
 
 ## Day to day
 

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block body %}
+<div class="card" style="max-width:24rem;margin:3rem auto">
+  <h2>Sign in</h2>
+  <p class="meta">The password is shared; your Telegram ID says which branch
+  you review, and goes on the record with every decision.</p>
+  {% if error %}<div class="flash">{{ error }}</div>{% endif %}
+  <form method="post">
+    <p><label>Password<br>
+      <input type="password" name="password" required autofocus style="width:100%"></label></p>
+    <p><label>Your Telegram ID<br>
+      <input type="text" name="telegram_id" required inputmode="numeric"
+             placeholder="from @userinfobot" style="width:100%"></label></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}
