@@ -81,6 +81,7 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 CallbackQueryHandler(handlers.on_submit, pattern=r"^(send|over)$"),
                 CallbackQueryHandler(handlers.on_source_button, pattern=r"^source$"),
                 cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_confirm_text),
             ],
             handlers.ASK_SOURCE: [
                 cancel_button,
@@ -94,11 +95,13 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 CallbackQueryHandler(handlers.on_climb, pattern=r"^climb:"),
                 CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_climb_text),
             ],
             handlers.REVIEW: [
                 CallbackQueryHandler(handlers.on_edit_pick, pattern=r"^edit:"),
                 CallbackQueryHandler(handlers.on_send_all, pattern=r"^sendall$"),
                 cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_review_text),
             ],
             handlers.EDIT_VALUE: [
                 CallbackQueryHandler(handlers.on_edit_remove, pattern=r"^remove$"),

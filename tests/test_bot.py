@@ -839,6 +839,108 @@ class RobustnessTests(BotTestCase):
         )
 
 
+class UnderstandingTypedAnswersTests(BotTestCase):
+    """People answer button questions with words. Read them."""
+
+    async def test_trailing_punctuation_never_reaches_a_name(self):
+        chat = Conversation(user_id=5300)
+        await chat.start()
+        await chat.say("Steven.")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Kalim,")
+
+        entry = self.queued()[0]["payload"]["people"][0]
+        self.assertEqual(entry["given_name"], "Steven")
+        self.assertEqual(entry["father_given_name"], "Kalim")
+
+    async def test_punctuation_inside_a_name_survives(self):
+        chat = Conversation(user_id=5301)
+        await chat.start()
+        await chat.say("Abou-Khalil")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.SKIP)
+        self.assertEqual(
+            self.queued()[0]["payload"]["people"][0]["given_name"], "Abou-Khalil"
+        )
+
+    async def test_a_spelling_typed_out_loud_finds_its_button(self):
+        """"Su K ar" is somebody spelling their own surname."""
+        chat = Conversation(user_id=5302)
+        await chat.start()
+        await chat.say("Steven")
+        await chat.say("Su K ar")
+        await chat.say("Kalim")
+        self.assertEqual(
+            self.queued()[0]["payload"]["people"][0]["family_name"], "Sukar"
+        )
+
+    async def test_a_typed_choice_works_for_any_button_question(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.say("daughter")
+        await chat.say("Rita")
+        await self.send_basket(chat)
+        self.assertEqual(self.queued()[0]["payload"]["people"][0]["sex"], "F")
+
+    async def test_gibberish_at_a_choice_still_re_asks(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.say("qqqq zzz")
+        self.assertIn(texts.NOT_UNDERSTOOD, chat.transcript())
+        self.assertIn(texts.ASK_CHILD_SEX, chat.text)
+
+    async def test_dunno_counts_as_i_dont_know(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("dunno")
+        self.assertIn(texts.CLIMB_YES, chat.buttons)
+
+    async def test_ok_is_a_yes_at_the_climb(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.say("Ok")
+        self.assertIn("Youssef's father", chat.text)
+
+    async def test_nah_is_a_no_at_the_climb(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.say("nah")
+        self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
+
+    async def test_unclear_text_re_shows_the_question_with_its_buttons(self):
+        """The old behaviour scolded and left them with no buttons at all."""
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.tap(texts.SKIP)
+        await chat.say("hmm what")
+        self.assertIn(texts.CLIMB_YES, chat.buttons)
+        self.assertIn("parents", chat.text)
+
+    async def test_typing_send_at_the_review_screen_sends(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_SON)
+        await chat.say("Sami")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap("Review and send")
+        await chat.say("yes")
+        self.assertEqual(len(self.queued()), 1)
+
+    async def test_unclear_text_at_the_review_screen_re_shows_the_list(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap(texts.CHILD_SON)
+        await chat.say("Sami")
+        await chat.tap(texts.ADD_MORE)
+        await chat.tap("Review and send")
+        await chat.say("what is this")
+        self.assertIn("Sami", chat.text)
+        self.assertIn("Send all 1", " ".join(chat.buttons))
+        self.assertEqual(self.queued(), [])
+
+
 class WiringTests(unittest.TestCase):
     def test_application_builds_with_every_handler_registered(self):
         from bot.main import build_application

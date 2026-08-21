@@ -16,6 +16,7 @@ renew. It runs anywhere Python runs.
 | `texts.py` | Every string the bot says. One file, so the tone stays consistent and nothing family-specific gets hardcoded. |
 | `flows.py` | The conversations, as data: a list of questions and a function turning answers into a payload. No Telegram, no database — testable on its own. |
 | `handlers.py` | One generic ask → confirm → advance loop over those flows. |
+| `understand.py` | Reading what people actually type when the bot asked with buttons. |
 | `store.py` | The only file that touches the database. |
 | `main.py` | Wiring and entry point. |
 
@@ -25,6 +26,27 @@ The spec asks for one question per message and for every typed answer to be
 confirmed before use. Written out per flow, that is five near-identical state
 machines and about twenty-five conversation states. Written as data, it is five
 states and a list of questions per flow. Adding a question is one line.
+
+## Reading what people type
+
+The bot asks with buttons; people answer with words. Every "use the buttons
+above" costs trust, and for the older relatives who hold most of the knowledge
+it is where they put the phone down.
+
+`understand.py` handles three things found by sitting someone in front of it:
+
+- **Trailing punctuation.** "Steven." became a person called `Steven.`, on the
+  display name, forever. Edge punctuation is stripped; inner punctuation
+  survives, because Abou-Khalil and O'Brien are real names.
+- **Typed answers to button questions.** "Su K ar" is somebody spelling their
+  own surname out loud. It now lands on the Sukar button. So does "daughter",
+  and "dunno" for "I don't know".
+- **Yes and no.** "Ok", "yeah", "nah", "that's all" all work where the bot
+  offered two buttons.
+
+It never guesses at a name — only at answers the bot already offered, and only
+when one option is clearly ahead. Genuine ambiguity re-asks, showing the
+question *with* its buttons rather than scolding and leaving nothing to tap.
 
 ## Constraint 4
 

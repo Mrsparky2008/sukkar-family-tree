@@ -24,7 +24,7 @@ from telegram.ext import ContextTypes, ConversationHandler
 
 import config
 import submissions
-from bot import flows, store, texts
+from bot import flows, store, texts, understand
 
 log = logging.getLogger(__name__)
 
@@ -457,12 +457,25 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if step is None:
         return await _ask(update, context)
 
+    typed = update.effective_message.text or ""
+
+    if step.optional and understand.is_skip(typed):
+        # "dunno" is an answer. Making them find the button for it is not.
+        state["answers"][step.id] = None
+        state["index"] += 1
+        return await _ask(update, context)
+
     if step.type == flows.CHOICE:
-        await _say(update, texts.NOT_UNDERSTOOD)
+        chosen = understand.match_choice(step.choices, typed)
+        if chosen is None:
+            await _say(update, texts.NOT_UNDERSTOOD)
+            return await _ask(update, context)
+        state["answers"][step.id] = chosen
+        state["index"] += 1
         return await _ask(update, context)
 
     try:
-        value = flows.clean(step, update.effective_message.text or "")
+        value = flows.clean(step, typed)
     except flows.FlowError as problem:
         await _say(update, str(problem))
         return await _ask(update, context)
@@ -628,6 +641,29 @@ async def _offer_climb(update: Update, context: ContextTypes.DEFAULT_TYPE, paylo
     return CLIMB
 
 
+async def on_climb_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"yes", "nah", "ok" — all perfectly good answers to a yes/no question."""
+    answer = understand.yes_no(update.effective_message.text or "")
+    if answer is True:
+        return await _climb_yes(update, context)
+    if answer is False:
+        return await _show_menu(update, context)
+
+    target = context.user_data.get("climb_to") or {}
+    name = target.get("label", "them").split()[0]
+    await _say(
+        update,
+        texts.CLIMB_PARENTS.format(name=name),
+        _kb(
+            [
+                [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
+                [_button(texts.ADD_MORE, CB_CLIMB_NO)],
+            ]
+        ),
+    )
+    return CLIMB
+
+
 async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -637,6 +673,14 @@ async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # The person we just named is still in the basket, so point the cursor at
     # the draft. Send resolves it to a real submission id.
+    target = context.user_data.get("climb_to") or {}
+    if not target:
+        return await _show_menu(update, context, texts.ERROR)
+
+    return await _climb_yes(update, context)
+
+
+async def _climb_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = context.user_data.get("climb_to") or {}
     if not target:
         return await _show_menu(update, context, texts.ERROR)
@@ -776,9 +820,28 @@ async def on_edit_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _show_review(update, context, texts.REMOVED)
 
 
+async def on_review_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    typed = update.effective_message.text or ""
+    if understand.match_choice([(texts.SEND_ALL.format(count=""), "send")], typed):
+        return await on_send_all(update, context)
+    if understand.yes_no(typed) is True:
+        return await on_send_all(update, context)
+    return await _show_review(update, context)
+
+
+async def on_confirm_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A typed yes at the final screen should send, not be refused."""
+    if understand.yes_no(update.effective_message.text or "") is True:
+        payload = _state(context).get("payload")
+        if payload is not None:
+            return await _send(update, context, payload)
+    return await _show_menu(update, context, texts.CANCELLED)
+
+
 async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Queue the whole basket, oldest first, resolving draft references."""
-    await update.callback_query.answer()
+    if update.callback_query is not None:
+        await update.callback_query.answer()
     basket = _basket(context)
     if not basket:
         return await _show_menu(update, context, texts.REVIEW_EMPTY)

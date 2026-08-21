@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 import config
 import submissions
-from bot import texts
+from bot import texts, understand
 
 #: Step types.
 NAME = "name"  # a single given name: validated, then confirmed
@@ -84,7 +84,7 @@ def clean_name(raw: str) -> str:
     family name to a string that already contains them, and the duplicate goes
     unnoticed for months.
     """
-    value = " ".join(raw.split())
+    value = understand.tidy(raw)
     if not value:
         raise FlowError(texts.NAME_EMPTY)
     if len(value) > MAX_NAME_LENGTH:
@@ -97,7 +97,7 @@ def clean_name(raw: str) -> str:
 
 
 def clean_text(raw: str) -> str:
-    value = " ".join(raw.split())
+    value = understand.tidy(raw)
     if not value:
         raise FlowError(texts.NAME_EMPTY)
     if len(value) > MAX_TEXT_LENGTH:
