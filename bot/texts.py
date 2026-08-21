@@ -181,6 +181,11 @@ SAVED = (
 #: menu. This is what walks a contributor up the generations instead of
 #: leaving them at their own parents.
 CLIMB_PARENTS = "Do you know {name}'s parents?"
+
+#: For a sibling or a child, their parents are already on the chart — asking
+#: would be absurd and answering would duplicate them. The useful next
+#: question is their own household.
+CLIMB_FAMILY = "Does {name} have {spouse} or children?"
 CLIMB_SIBLINGS = "Did {name} have brothers or sisters?"
 CLIMB_YES = "Yes, let's do that"
 CLIMB_NO = "No, that's all I know"

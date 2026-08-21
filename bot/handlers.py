@@ -304,9 +304,19 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
 
     if entries:
         target = entries[0]
+        # Whose parents are unknown, climb toward them. A sibling's or child's
+        # parents are already here — for them the useful question is their own
+        # wife, husband and children.
+        mode = (
+            "parents"
+            if target["role"] in (submissions.FATHER, submissions.MOTHER,
+                                  submissions.SPOUSE)
+            else "family"
+        )
         context.user_data["climb_to"] = {
             "label": submissions.person_label(target),
             "draft_id": payload["_draft_id"],
+            "mode": mode,
         }
         rows = [
             [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
@@ -319,12 +329,19 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
         ]
         await _say(
             update,
-            f"{added}\n\n" + texts.CLIMB_PARENTS.format(name=target["given_name"]),
+            f"{added}\n\n" + _climb_prompt(target["given_name"], target.get("sex"), mode),
             _kb(rows),
         )
         return CLIMB
 
     return await _show_menu(update, context, added)
+
+
+def _climb_prompt(name: str, sex: str | None, mode: str) -> str:
+    if mode == "parents":
+        return texts.CLIMB_PARENTS.format(name=name)
+    spouse = {"M": "a wife", "F": "a husband"}.get(sex or "", "a wife or husband")
+    return texts.CLIMB_FAMILY.format(name=name, spouse=spouse)
 
 
 # ===========================================================================
@@ -666,7 +683,7 @@ async def on_climb_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = target.get("label", "them").split()[0]
     await _say(
         update,
-        texts.CLIMB_PARENTS.format(name=name),
+        _climb_prompt(name, None, target.get("mode", "parents")),
         _kb(
             [
                 [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
@@ -707,6 +724,10 @@ async def _climb_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "label": target["label"],
         },
     )
+    if target.get("mode") == "family":
+        # Their household: the menu, pointed at them, says exactly what can
+        # be added — their spouse, their children.
+        return await _show_menu(update, context)
     _begin(context, flows.ADD_PARENTS)
     return await _ask(update, context)
 
