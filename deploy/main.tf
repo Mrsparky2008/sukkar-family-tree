@@ -62,6 +62,20 @@ variable "branch" {
   default     = "main"
 }
 
+variable "code_url" {
+  description = "Presigned GET URL for the code bundle, so first boot needs only curl."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "log_url" {
+  description = "Presigned PUT URL the boot log uploads itself to."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
 variable "telegram_bot_token" {
   description = <<-TEXT
     The bot token from @BotFather. Optional: leave empty and paste it into
@@ -98,7 +112,7 @@ variable "ssh_key_name" {
 resource "aws_lightsail_instance" "bot" {
   name              = var.name
   availability_zone = "${var.region}a"
-  blueprint_id      = "debian_12"
+  blueprint_id      = "ubuntu_24_04"
   bundle_id         = var.bundle
   key_pair_name     = var.ssh_key_name != "" ? var.ssh_key_name : null
 
@@ -109,6 +123,8 @@ resource "aws_lightsail_instance" "bot" {
     region         = var.region
     telegram_token = var.telegram_bot_token
     admin_password = var.admin_password
+    code_url       = var.code_url
+    log_url        = var.log_url
     backup_key     = aws_iam_access_key.backup.id
     backup_secret  = aws_iam_access_key.backup.secret
   })

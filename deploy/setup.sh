@@ -48,7 +48,10 @@ fi
 # bytes that were tested are the exact bytes that run. Git remains a fallback.
 
 mkdir -p "$APP"
-if aws s3 cp "s3://$BUCKET/code/family-tree.tar.gz" /tmp/code.tar.gz --only-show-errors; then
+if [ -n "$CODE_URL" ] && curl -fsSL "$CODE_URL" -o /tmp/code.tar.gz; then
+  tar -xzf /tmp/code.tar.gz -C "$APP"
+  rm -f /tmp/code.tar.gz
+elif aws s3 cp "s3://$BUCKET/code/family-tree.tar.gz" /tmp/code.tar.gz --only-show-errors; then
   tar -xzf /tmp/code.tar.gz -C "$APP"
   rm -f /tmp/code.tar.gz
 elif [ -d "$APP/.git" ]; then
