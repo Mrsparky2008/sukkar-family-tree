@@ -42,12 +42,12 @@ variable "name" {
 
 variable "bundle" {
   description = <<-TEXT
-    Lightsail size. nano_3_0 is 512 MB and about $5/month, which is ample:
+    Lightsail size. nano_3_2 is 512 MB and about $5/month, which is ample:
     the bot is idle between messages and the whole database is a few
     megabytes. Move up only if you outgrow it, which you will not.
   TEXT
   type        = string
-  default     = "nano_3_0"
+  default     = "nano_3_2"
 }
 
 variable "repository" {
