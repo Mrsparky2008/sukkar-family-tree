@@ -306,3 +306,29 @@ class RealisticInputTests(unittest.TestCase):
         reading = dictation.parse("his son is Khalil Abou Haddad")
         self.assertEqual(len(reading.people), 1)
         self.assertEqual(reading.people[0].label(), "Khalil Abou Haddad")
+
+
+class PossessiveSubjectTests(unittest.TestCase):
+    """"Kalims sisters are..." names Kalim, not a man called Kalims."""
+
+    def test_a_known_name_before_a_role_word_is_a_possessive(self):
+        reading = dictation.parse(
+            "Kalims sisters are Dibeh and Sonia",
+            subject_name="Wadiha",
+            known_names={"Kalim", "Wadiha"},
+        )
+        self.assertEqual([m.given_name for m in reading.people], ["Dibeh", "Sonia"])
+        self.assertEqual({m.about for m in reading.people}, {"Kalim"})
+
+    def test_an_apostrophe_works_the_same_way(self):
+        reading = dictation.parse(
+            "Kalim's parents are Toufic and Cilene",
+            known_names={"Kalim"},
+        )
+        self.assertEqual({m.about for m in reading.people}, {"Kalim"})
+
+    def test_an_unknown_name_is_not_swallowed_as_a_possessive(self):
+        reading = dictation.parse(
+            "Zaher sisters are Dibeh and Sonia", known_names={"Kalim"}
+        )
+        self.assertIn("Zaher", [m.given_name for m in reading.people])

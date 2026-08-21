@@ -19,6 +19,7 @@ automatically.
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sqlite3
 import sys
 from typing import Any
@@ -54,6 +55,17 @@ def resolve_subject(conn: sqlite3.Connection, payload: dict[str, Any]) -> int | 
         parent = db.get_submission(conn, int(about["submission_id"]))
         if parent is None:
             raise Blocked(f"it hangs off submission #{about['submission_id']}, which is gone")
+
+        # "Add my parents" creates two people. An anchor meaning the mother
+        # must not quietly resolve to the father, or her parents become his
+        # and her siblings inherit the wrong pair.
+        wanted = (about.get("label") or "").split()
+        if wanted and parent["status"] in ("approved", "merged"):
+            first = wanted[0].casefold()
+            for person in db.people_from_submission(conn, parent["id"]):
+                if (person["given_name"] or "").casefold() == first:
+                    return int(person["id"])
+
         if parent["resulting_person_id"]:
             return int(parent["resulting_person_id"])
         raise Blocked(
@@ -64,10 +76,14 @@ def resolve_subject(conn: sqlite3.Connection, payload: dict[str, Any]) -> int | 
     return None
 
 
-def _create(conn, entry: dict[str, Any], reviewed_by: int, **links) -> int:
+def _create(
+    conn, entry: dict[str, Any], reviewed_by: int, submission_id: int | None = None,
+    **links,
+) -> int:
     return db.create_person(
         conn,
         entry["given_name"],
+        from_submission_id=submission_id,
         given_name_ar=entry.get("given_name_ar"),
         family_name=entry.get("family_name"),
         sex=entry.get("sex"),
@@ -133,7 +149,7 @@ def approve(
         """Reuse the matched person for the primary role; create the rest."""
         if is_primary and use_person_id is not None:
             return use_person_id
-        new_id = _create(conn, entry, reviewed_by)
+        new_id = _create(conn, entry, reviewed_by, submission_id)
         created.append(new_id)
         return new_id
 
@@ -447,6 +463,35 @@ def show_person(conn: sqlite3.Connection, person_id: int) -> None:
     print()
 
 
+def export_everything(conn: sqlite3.Connection, path: str) -> int:
+    """Write the whole database out as plain JSON.
+
+    Insurance against this project, not against the disk. If the code is
+    rewritten, replaced, or abandoned, what relatives typed in survives in a
+    format anything can read — including the submissions, which are the
+    original words rather than the interpretation of them.
+    """
+    import json
+
+    tables = ("branches", "people", "unions", "submissions", "contributors",
+              "family_variants")
+    dump = {
+        "exported_from": str(config.DATABASE_PATH),
+        "family": config.FAMILY_NAME,
+        "village": config.VILLAGE,
+    }
+    total = 0
+    for table in tables:
+        rows = [dict(row) for row in conn.execute(f"SELECT * FROM {table}")]
+        dump[table] = rows
+        total += len(rows)
+
+    pathlib.Path(path).write_text(
+        json.dumps(dump, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return total
+
+
 def show_tree(conn: sqlite3.Connection) -> None:
     people = db.get_people(conn)
     print(f"\n{len(people)} people, {len(db.get_unions(conn))} unions\n")
@@ -478,6 +523,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--tree", action="store_true")
     parser.add_argument("--who", type=int, metavar="PERSON_ID",
                         help="drill down: who they are and who says so")
+    parser.add_argument("--export", metavar="FILE",
+                        help="write everything out as plain JSON")
     parser.add_argument("--spellings", action="store_true",
                         help="where each spelling of the family name split off")
     parser.add_argument("--as", dest="reviewer", type=int, default=0,
@@ -489,7 +536,10 @@ def main(argv: list[str] | None = None) -> int:
     db.init_db(conn)
 
     try:
-        if args.who is not None:
+        if args.export:
+            count = export_everything(conn, args.export)
+            print(f"wrote {count} rows to {args.export}")
+        elif args.who is not None:
             show_person(conn, args.who)
         elif args.spellings:
             show_spellings(conn)

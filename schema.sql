@@ -96,6 +96,10 @@ CREATE TABLE IF NOT EXISTS people (
     family_name_self_reported INTEGER NOT NULL DEFAULT 0
                               CHECK (family_name_self_reported IN (0, 1)),
     created_by_telegram_id INTEGER,
+    -- Which submission produced this person. `resulting_person_id` on the
+    -- submission names only one, but "add my parents" creates two, and an
+    -- anchor pointing at the mother must not resolve to the father.
+    from_submission_id     INTEGER REFERENCES submissions(id) ON DELETE SET NULL,
     created_at             TEXT    NOT NULL DEFAULT (datetime('now')),
 
     CHECK (trim(given_name) <> ''),

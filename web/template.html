@@ -1,0 +1,842 @@
+<title>__TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Arabic:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root {
+  --ground: __background__;
+  --surface: __surface__;
+  --ink: __text__;
+  --muted: __text_muted__;
+  --rule: __border__;
+  --accent: __accent__;
+  --male: __node_male__;
+  --female: __node_female__;
+  --unknown: __node_unknown__;
+  --line-descent: __edge_parent__;
+  --line-marriage: __edge_union__;
+
+  --display: "Spectral", Georgia, "Times New Roman", serif;
+  --body: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, -apple-system, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --step: 0.5rem;
+  --rail: 22rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: __dark_background__;
+    --surface: __dark_surface__;
+    --ink: __dark_text__;
+    --muted: __dark_text_muted__;
+    --rule: __dark_border__;
+    --accent: __dark_accent__;
+    --male: __dark_node_male__;
+    --female: __dark_node_female__;
+    --unknown: __dark_node_unknown__;
+    --line-descent: __dark_edge_parent__;
+    --line-marriage: __dark_edge_union__;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: __dark_background__;
+  --surface: __dark_surface__;
+  --ink: __dark_text__;
+  --muted: __dark_text_muted__;
+  --rule: __dark_border__;
+  --accent: __dark_accent__;
+  --male: __dark_node_male__;
+  --female: __dark_node_female__;
+  --unknown: __dark_node_unknown__;
+  --line-descent: __dark_edge_parent__;
+  --line-marriage: __dark_edge_union__;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+/* ---- masthead ---------------------------------------------------------- */
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--step) calc(var(--step) * 2);
+  padding: calc(var(--step) * 1.5) calc(var(--step) * 2);
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+h1 {
+  font-family: var(--display);
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.place {
+  font-family: var(--display);
+  font-style: italic;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.tally {
+  margin-inline-start: auto;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* ---- controls ---------------------------------------------------------- */
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--step);
+  width: 100%;
+  align-items: center;
+}
+
+input[type="search"] {
+  flex: 1 1 12rem;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0.4rem 0.6rem;
+}
+
+input[type="search"]:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  color: var(--surface);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.chip .swatch {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  margin-inline-end: 0.35rem;
+  vertical-align: baseline;
+}
+
+/* ---- chart ------------------------------------------------------------- */
+
+main { position: relative; overflow: hidden; }
+
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+
+.legend {
+  position: absolute;
+  inset-block-end: var(--step);
+  inset-inline-start: var(--step);
+  display: flex;
+  gap: calc(var(--step) * 1.5);
+  padding: 0.4rem 0.7rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-size: 0.72rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.legend i { display: inline-block; width: 1.4rem; height: 0; vertical-align: middle; margin-inline-end: 0.35rem; }
+.legend .descent { border-top: 1.5px solid var(--line-descent); }
+.legend .marriage { border-top: 1.5px dashed var(--line-marriage); }
+
+.hint {
+  position: absolute;
+  inset-block-start: var(--step);
+  inset-inline-end: var(--step);
+  font-size: 0.72rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+/* ---- the panel --------------------------------------------------------- */
+
+aside {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: var(--rail);
+  max-width: 100%;
+  background: var(--surface);
+  border-inline-start: 1px solid var(--rule);
+  padding: calc(var(--step) * 2);
+  overflow-y: auto;
+  transform: translateX(101%);
+  transition: transform 180ms ease;
+}
+
+aside[data-open="true"] { transform: none; }
+
+@media (prefers-reduced-motion: reduce) { aside { transition: none; } }
+
+@media (max-width: 40rem) {
+  aside {
+    inset-block-start: auto;
+    inset-inline: 0;
+    width: auto;
+    max-height: 62%;
+    border-inline-start: 0;
+    border-block-start: 1px solid var(--rule);
+    transform: translateY(101%);
+  }
+}
+
+aside h2 {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 2rem 0.15rem 0;
+  text-wrap: balance;
+}
+
+.arabic { font-family: "IBM Plex Sans Arabic", var(--body); direction: rtl; }
+
+.close {
+  position: absolute;
+  inset-block-start: calc(var(--step) * 1.5);
+  inset-inline-end: calc(var(--step) * 1.5);
+  font: inherit;
+  line-height: 1;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  font-size: 1.4rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+}
+
+.branchline {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-block-end: calc(var(--step) * 2);
+}
+
+.field { margin-block-end: calc(var(--step) * 1.75); }
+
+.field h3 {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--muted);
+  margin: 0 0 0.3rem;
+}
+
+.field ul { margin: 0; padding: 0; list-style: none; }
+.field li { margin-block-end: 0.15rem; }
+
+.link {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: start;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+
+.link:hover { text-decoration-color: var(--accent); }
+
+.said {
+  font-size: 0.82rem;
+  color: var(--muted);
+  border-inline-start: 2px solid var(--rule);
+  padding-inline-start: 0.6rem;
+  margin-block-end: 0.5rem;
+}
+
+.said b { font-weight: 500; color: var(--ink); }
+
+.note { font-style: italic; }
+
+footer {
+  font-size: 0.72rem;
+  color: var(--muted);
+  border-block-start: 1px solid var(--rule);
+  padding-block-start: var(--step);
+  margin-block-start: calc(var(--step) * 2);
+}
+</style>
+
+<header>
+  <h1>__HEADING__</h1>
+  <span class="place">__PLACE__</span>
+  <span class="tally" id="tally"></span>
+  <div class="controls">
+    <input type="search" id="search" placeholder="Find a name" autocomplete="off" spellcheck="false">
+    <div id="branches" style="display:flex;gap:var(--step);flex-wrap:wrap"></div>
+  </div>
+</header>
+
+<main>
+  <canvas id="chart"></canvas>
+  <p class="hint">Drag to move · scroll or pinch to zoom</p>
+  <div class="legend">
+    <span><i class="descent"></i>descent</span>
+    <span><i class="marriage"></i>marriage</span>
+  </div>
+  <aside id="panel" aria-live="polite"><button class="close" id="close" aria-label="Close">&times;</button><div id="panelBody"></div></aside>
+</main>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+"use strict";
+
+const DATA = JSON.parse(document.getElementById("data").textContent);
+const PEOPLE = new Map(DATA.people.map(p => [p.id, p]));
+const BRANCHES = new Map(DATA.branches.map(b => [b.id, b]));
+
+/* ---------------------------------------------------------------------------
+   Generations.
+
+   A person sits one row below their lowest-placed parent. Spouses are pulled
+   onto the same row so a marriage reads across rather than diagonally. Cousin
+   marriages leave marriage lines that cross the chart — that is not a fault in
+   the drawing, it is the shape of this family.
+--------------------------------------------------------------------------- */
+
+function assignRows() {
+  const row = new Map();
+  DATA.people.forEach(p => row.set(p.id, 0));
+
+  for (let pass = 0; pass < 24; pass++) {
+    let moved = false;
+    for (const person of DATA.people) {
+      for (const parentId of [person.father, person.mother]) {
+        if (parentId == null) continue;
+        const want = (row.get(parentId) ?? 0) + 1;
+        if (want > row.get(person.id)) { row.set(person.id, want); moved = true; }
+      }
+    }
+    for (const [a, b] of DATA.unions) {
+      const highest = Math.max(row.get(a) ?? 0, row.get(b) ?? 0);
+      if (row.get(a) !== highest) { row.set(a, highest); moved = true; }
+      if (row.get(b) !== highest) { row.set(b, highest); moved = true; }
+    }
+    if (!moved) break;
+  }
+  return row;
+}
+
+const ROW = assignRows();
+
+/* Order within each row.
+
+   Walking down from the eldest, depth first, keeps a family contiguous: a man,
+   then his wife, then his children, before the chart moves on to his brother.
+   That is what stops descent lines swooping across the whole width. A few
+   barycentre sweeps afterwards tidy the crossings that remain — and with
+   cousins marrying cousins, some crossings are simply true. */
+
+function assignColumns() {
+  const rows = new Map();
+  const partners = new Map();
+  const kids = new Map();
+
+  for (const person of DATA.people) {
+    const r = ROW.get(person.id);
+    if (!rows.has(r)) rows.set(r, []);
+    for (const parentId of [person.father, person.mother]) {
+      if (parentId == null) continue;
+      if (!kids.has(parentId)) kids.set(parentId, []);
+      if (!kids.get(parentId).includes(person.id)) kids.get(parentId).push(person.id);
+    }
+  }
+  for (const [a, b] of DATA.unions) {
+    if (!partners.has(a)) partners.set(a, []);
+    if (!partners.has(b)) partners.set(b, []);
+    partners.get(a).push(b);
+    partners.get(b).push(a);
+  }
+
+  const seen = new Set();
+  function place(id) {
+    if (seen.has(id)) return;
+    seen.add(id);
+    rows.get(ROW.get(id)).push(id);
+    for (const mate of partners.get(id) ?? []) {
+      if (!seen.has(mate) && ROW.get(mate) === ROW.get(id)) {
+        seen.add(mate);
+        rows.get(ROW.get(mate)).push(mate);
+      }
+    }
+    const descendants = new Set(kids.get(id) ?? []);
+    for (const mate of partners.get(id) ?? []) {
+      for (const kid of kids.get(mate) ?? []) descendants.add(kid);
+    }
+    for (const kid of [...descendants].sort((x, y) => x - y)) place(kid);
+  }
+
+  const roots = DATA.people
+    .filter(p => p.father == null && p.mother == null)
+    .sort((x, y) => ROW.get(x.id) - ROW.get(y.id) || x.id - y.id);
+  for (const root of roots) place(root.id);
+  for (const person of DATA.people) place(person.id);
+
+  const order = new Map();
+  const sorted = [...rows.keys()].sort((x, y) => x - y);
+  for (const r of sorted) rows.get(r).forEach((id, i) => order.set(id, i));
+
+  /* Sweeping people individually pulls married couples apart: each is dragged
+     toward their own parents, and they end up at opposite ends of the row. So
+     a couple is ordered as one unit and expanded again afterwards. */
+
+  function unitsFor(r) {
+    const made = [];
+    const used = new Set();
+    for (const id of rows.get(r)) {
+      if (used.has(id)) continue;
+      const unit = [id];
+      used.add(id);
+      for (const mate of partners.get(id) ?? []) {
+        if (!used.has(mate) && ROW.get(mate) === r) { unit.push(mate); used.add(mate); }
+      }
+      made.push(unit);
+    }
+    return made;
+  }
+
+  for (let sweep = 0; sweep < 8; sweep++) {
+    const downward = sweep % 2 === 0;
+    const pass = downward ? sorted : [...sorted].reverse();
+    for (const r of pass) {
+      const units = unitsFor(r);
+      const pull = new Map();
+      units.forEach((unit, index) => {
+        const anchors = [];
+        for (const id of unit) {
+          const person = PEOPLE.get(id);
+          if (downward) {
+            for (const pid of [person.father, person.mother]) {
+              if (pid != null && order.has(pid)) anchors.push(order.get(pid));
+            }
+          } else {
+            for (const kid of kids.get(id) ?? []) {
+              if (order.has(kid)) anchors.push(order.get(kid));
+            }
+          }
+        }
+        pull.set(unit, anchors.length
+          ? anchors.reduce((a, b) => a + b, 0) / anchors.length
+          : order.get(unit[0]) ?? index);
+      });
+      units.sort((a, b) => pull.get(a) - pull.get(b) || order.get(a[0]) - order.get(b[0]));
+      const flat = units.flat();
+      rows.set(r, flat);
+      flat.forEach((id, i) => order.set(id, i));
+    }
+  }
+
+  return { order, rows, sorted, partners };
+}
+
+const { order, rows, sorted, partners } = assignColumns();
+
+const COL_W = 124, ROW_H = 138, NODE_W = 104, NODE_H = 42;
+
+const POS = new Map();
+for (const r of sorted) {
+  const members = rows.get(r);
+  const width = members.length * COL_W;
+  members.forEach((id, i) => {
+    POS.set(id, { x: i * COL_W - width / 2 + COL_W / 2, y: r * ROW_H });
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   Drawing
+--------------------------------------------------------------------------- */
+
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
+let view = { x: 0, y: 0, k: 1 };
+let selected = null, filterBranch = null, query = "";
+
+function css(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function resize() {
+  const ratio = window.devicePixelRatio || 1;
+  const box = canvas.getBoundingClientRect();
+  canvas.width = box.width * ratio;
+  canvas.height = box.height * ratio;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  draw();
+}
+
+function visible(person) {
+  if (filterBranch != null && person.branch !== filterBranch) return false;
+  return true;
+}
+
+function matches(person) {
+  if (!query) return false;
+  return person.search.includes(query);
+}
+
+function draw() {
+  const box = canvas.getBoundingClientRect();
+  ctx.clearRect(0, 0, box.width, box.height);
+  ctx.save();
+  ctx.translate(view.x, view.y);
+  ctx.scale(view.k, view.k);
+
+  const descent = css("--line-descent");
+  const marriage = css("--line-marriage");
+
+  /* Descent is drawn the way a genealogy chart draws it: one drop from the
+     couple, a horizontal bus over their children, and a short riser to each.
+     Eight separate curves from one pair of parents is technically the same
+     information and far harder to read. */
+
+  ctx.lineWidth = 1.2;
+  ctx.strokeStyle = descent;
+  ctx.lineJoin = "round";
+
+  const families = new Map();
+  for (const person of DATA.people) {
+    if (!visible(person)) continue;
+    const pair = [person.father, person.mother]
+      .filter(id => id != null && PEOPLE.get(id) && visible(PEOPLE.get(id)));
+    if (!pair.length) continue;
+    const key = pair.join("+");
+    if (!families.has(key)) families.set(key, { parents: pair, children: [] });
+    families.get(key).children.push(person.id);
+  }
+
+  for (const { parents, children } of families.values()) {
+    const above = parents.map(id => POS.get(id));
+    const fromX = above.reduce((sum, p) => sum + p.x, 0) / above.length;
+    const fromY = Math.max(...above.map(p => p.y)) + NODE_H / 2;
+    const below = children.map(id => POS.get(id));
+    const toY = Math.min(...below.map(p => p.y)) - NODE_H / 2;
+    const busY = toY - 22;
+
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(fromX, busY);
+    ctx.stroke();
+
+    const left = Math.min(fromX, ...below.map(p => p.x));
+    const right = Math.max(fromX, ...below.map(p => p.x));
+    ctx.beginPath();
+    ctx.moveTo(left, busY);
+    ctx.lineTo(right, busY);
+    ctx.stroke();
+
+    for (const child of below) {
+      ctx.beginPath();
+      ctx.moveTo(child.x, busY);
+      ctx.lineTo(child.x, child.y - NODE_H / 2);
+      ctx.stroke();
+    }
+  }
+
+  ctx.strokeStyle = marriage;
+  ctx.setLineDash([4, 4]);
+  for (const [a, b] of DATA.unions) {
+    const pa = PEOPLE.get(a), pb = PEOPLE.get(b);
+    if (!pa || !pb || !visible(pa) || !visible(pb)) continue;
+    const A = POS.get(a), B = POS.get(b);
+    ctx.beginPath();
+    ctx.moveTo(A.x, A.y);
+    ctx.lineTo(B.x, B.y);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  const ink = css("--ink"), surface = css("--surface"), rule = css("--rule");
+  const accent = css("--accent"), muted = css("--muted");
+
+  for (const person of DATA.people) {
+    if (!visible(person)) continue;
+    const { x, y } = POS.get(person.id);
+    const hit = matches(person);
+    const isSelected = selected === person.id;
+
+    ctx.fillStyle = surface;
+    ctx.strokeStyle = isSelected ? accent : (hit ? accent : rule);
+    ctx.lineWidth = isSelected || hit ? 2 : 1;
+    roundRect(x - NODE_W / 2, y - NODE_H / 2, NODE_W, NODE_H, 3);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = person.sex === "M" ? css("--male")
+                  : person.sex === "F" ? css("--female") : css("--unknown");
+    ctx.fillRect(x - NODE_W / 2, y - NODE_H / 2, 3, NODE_H);
+
+    ctx.fillStyle = query && !hit ? muted : ink;
+    ctx.font = "500 12px " + css("--body");
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const second = person.aka ? person.aka : person.family;
+    ctx.fillText(clip(person.given, 13), x + 2, y - (second ? 7 : 0));
+    if (second) {
+      ctx.fillStyle = muted;
+      ctx.font = "400 10.5px " + css("--body");
+      ctx.fillText(clip(second, 15), x + 2, y + 8);
+    }
+  }
+  ctx.restore();
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function clip(text, max) {
+  return text.length > max ? text.slice(0, max - 1) + "\\u2026" : text;
+}
+
+/* ---------------------------------------------------------------------------
+   Moving about
+--------------------------------------------------------------------------- */
+
+function fit() {
+  const box = canvas.getBoundingClientRect();
+  const shown = DATA.people.filter(visible).map(p => POS.get(p.id));
+  if (!shown.length) return;
+  const xs = shown.map(p => p.x), ys = shown.map(p => p.y);
+  const w = Math.max(...xs) - Math.min(...xs) + NODE_W * 2;
+  const h = Math.max(...ys) - Math.min(...ys) + NODE_H * 3;
+  // On a phone, fitting forty people across four inches gives a wall of
+  // specks. Better to open at a size names can be read at and let them pan.
+  const READABLE = 0.55;
+  view.k = Math.max(Math.min(box.width / w, box.height / h, 1.25), READABLE);
+  view.x = box.width / 2 - ((Math.min(...xs) + Math.max(...xs)) / 2) * view.k;
+  view.y = box.height / 2 - ((Math.min(...ys) + Math.max(...ys)) / 2) * view.k;
+  draw();
+}
+
+let dragging = false, last = null, pinch = null;
+
+canvas.addEventListener("pointerdown", e => {
+  dragging = true; last = { x: e.clientX, y: e.clientY };
+  canvas.classList.add("dragging");
+  canvas.setPointerCapture(e.pointerId);
+});
+
+canvas.addEventListener("pointermove", e => {
+  if (!dragging || !last) return;
+  view.x += e.clientX - last.x;
+  view.y += e.clientY - last.y;
+  last = { x: e.clientX, y: e.clientY };
+  draw();
+});
+
+canvas.addEventListener("pointerup", e => {
+  canvas.classList.remove("dragging");
+  if (last && Math.abs(e.clientX - last.x) < 4) pick(e);
+  dragging = false; last = null;
+});
+
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  const box = canvas.getBoundingClientRect();
+  const mx = e.clientX - box.left, my = e.clientY - box.top;
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  const next = Math.min(3, Math.max(0.12, view.k * factor));
+  view.x = mx - (mx - view.x) * (next / view.k);
+  view.y = my - (my - view.y) * (next / view.k);
+  view.k = next;
+  draw();
+}, { passive: false });
+
+function pick(e) {
+  const box = canvas.getBoundingClientRect();
+  const x = (e.clientX - box.left - view.x) / view.k;
+  const y = (e.clientY - box.top - view.y) / view.k;
+  for (const person of DATA.people) {
+    if (!visible(person)) continue;
+    const p = POS.get(person.id);
+    if (Math.abs(x - p.x) <= NODE_W / 2 && Math.abs(y - p.y) <= NODE_H / 2) {
+      show(person.id);
+      return;
+    }
+  }
+  hide();
+}
+
+/* ---------------------------------------------------------------------------
+   The panel
+--------------------------------------------------------------------------- */
+
+const panel = document.getElementById("panel");
+const panelBody = document.getElementById("panelBody");
+
+function nameButton(id) {
+  const person = PEOPLE.get(id);
+  if (!person) return "";
+  return '<button class="link" data-go="' + id + '">' + escape(person.display) + "</button>";
+}
+
+function escape(text) {
+  return String(text).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function list(title, ids) {
+  if (!ids || !ids.length) return "";
+  return '<div class="field"><h3>' + title + "</h3><ul><li>"
+    + ids.map(nameButton).join("</li><li>") + "</li></ul></div>";
+}
+
+function show(id) {
+  const person = PEOPLE.get(id);
+  if (!person) return;
+  selected = id;
+
+  const branch = BRANCHES.get(person.branch);
+  let html = "<h2>" + escape(person.display) + "</h2>";
+  if (person.arabic) html += '<p class="arabic">' + escape(person.arabic) + "</p>";
+  html += '<p class="branchline">';
+  html += branch ? escape(branch.name) : "No branch recorded";
+  if (person.spellings.length > 1) {
+    html += " · also written " + person.spellings.slice(1).map(escape).join(", ");
+  }
+  html += "</p>";
+
+  html += list("Parents", person.parents);
+  html += list("Married", person.partners);
+  html += list("Brothers and sisters", person.siblings);
+  html += list("Children", person.children);
+
+  if (person.notes) {
+    html += '<div class="field"><h3>Notes</h3><p class="note">'
+      + escape(person.notes) + "</p></div>";
+  }
+
+  if (person.claims.length) {
+    html += '<div class="field"><h3>Who says so</h3>';
+    for (const claim of person.claims) {
+      html += '<p class="said">' + escape(claim.what) + "<br><b>"
+        + escape(claim.who) + "</b> — " + escape(claim.how);
+      if (claim.heard) html += ", who heard it from " + escape(claim.heard);
+      html += "</p>";
+    }
+    html += "</div>";
+  }
+
+  html += "<footer>Nothing here is a date. Names and relationships only.</footer>";
+
+  panelBody.innerHTML = html;
+  panel.dataset.open = "true";
+  draw();
+}
+
+function hide() {
+  selected = null;
+  panel.dataset.open = "false";
+  draw();
+}
+
+panelBody.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go) show(Number(go.dataset.go));
+});
+
+document.getElementById("close").addEventListener("click", hide);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") hide();
+  if (e.key === "/" && document.activeElement !== searchBox) {
+    e.preventDefault(); searchBox.focus();
+  }
+});
+
+/* ---------------------------------------------------------------------------
+   Search and branch filter
+--------------------------------------------------------------------------- */
+
+const searchBox = document.getElementById("search");
+searchBox.addEventListener("input", () => {
+  query = searchBox.value.trim().toLowerCase();
+  const hits = DATA.people.filter(matches);
+  if (query && hits.length === 1) show(hits[0].id);
+  draw();
+});
+
+const branchBar = document.getElementById("branches");
+function chip(label, value, colour) {
+  const button = document.createElement("button");
+  button.className = "chip";
+  button.type = "button";
+  button.setAttribute("aria-pressed", String(filterBranch === value));
+  button.innerHTML = (colour ? '<span class="swatch" style="background:' + colour + '"></span>' : "")
+    + escape(label);
+  button.addEventListener("click", () => {
+    filterBranch = filterBranch === value ? null : value;
+    [...branchBar.children].forEach(c => c.setAttribute("aria-pressed", "false"));
+    if (filterBranch !== null) button.setAttribute("aria-pressed", "true");
+    hide(); fit();
+  });
+  branchBar.appendChild(button);
+  return button;
+}
+
+if (DATA.branches.length > 1) {
+  for (const b of DATA.branches) chip(b.name, b.id, b.colour);
+}
+
+document.getElementById("tally").textContent =
+  DATA.people.length + " people · " + DATA.unions.length + " marriages";
+
+window.addEventListener("resize", resize);
+resize();
+fit();
+</script>

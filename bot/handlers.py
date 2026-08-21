@@ -482,6 +482,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             typed,
             default_role=flows.default_role(_state(context)["kind"], step.id),
             subject_name=_subject_name_or_none(context),
+            known_names=await _known_names(update, context),
         )
         if reading:
             return await _absorb_dictation(update, context, reading)
@@ -750,6 +751,22 @@ def _join(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
+async def _known_names(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> set[str]:
+    """Given names this contributor could plausibly be talking about."""
+    names = set()
+    for payload in _basket(context):
+        for entry in payload.get("people") or []:
+            if entry.get("given_name"):
+                names.add(entry["given_name"])
+    for candidate in await store.subject_candidates(update.effective_user.id):
+        first = (candidate["label"] or "").split()
+        if first:
+            names.add(first[0])
+    return names
+
+
 def _find_in_basket(
     context: ContextTypes.DEFAULT_TYPE, name: str
 ) -> dict[str, Any] | None:
@@ -876,11 +893,33 @@ async def _absorb_dictation(
 
     _reset(context)
     drafts_by_label: dict[str, str] = {}
-    parents = [
-        m for m in reading.people
-        if m.role in (submissions.FATHER, submissions.MOTHER)
-    ]
-    others = [m for m in reading.people if m not in parents]
+
+    def subject_for(mention) -> dict[str, Any] | None:
+        """Whoever this mention hangs off: the line's own subject, or the cursor."""
+        if not mention.about:
+            return dict(about)
+        found = anchors.get(mention.about)
+        if found is None:
+            return None
+        subject = submissions.subject(
+            person_id=found["person_id"],
+            submission_id=found["submission_id"],
+            label=found["label"],
+        )
+        if found.get("draft_id"):
+            subject["draft_id"] = found["draft_id"]
+        return subject
+
+    # Parents are grouped so a father and mother arrive married to each other,
+    # but they must be grouped BY SUBJECT: "Kalim's parents are Toufic and
+    # Cilene" is about Kalim, not about whoever the cursor was left on.
+    parent_groups: dict[str | None, list] = {}
+    others = []
+    for mention in reading.people:
+        if mention.role in (submissions.FATHER, submissions.MOTHER):
+            parent_groups.setdefault(mention.about, []).append(mention)
+        else:
+            others.append(mention)
 
     def entry_of(mention: dictation.Mention):
         return submissions.person(
@@ -899,12 +938,15 @@ async def _absorb_dictation(
         return draft_id
 
     try:
-        if parents:
+        for owner, parents in parent_groups.items():
+            subject = subject_for(parents[0])
+            if subject is None:
+                continue  # nobody to hang them off; already reported above
             stash(
                 submissions.build(
                     submissions.ADD_PARENTS,
                     submitted_by=submitted_by,
-                    about=dict(about),
+                    about=subject,
                     people=[entry_of(m) for m in parents],
                     note=note,
                 )
@@ -931,19 +973,10 @@ async def _absorb_dictation(
                         subject["draft_id"] = found["draft_id"]
                 else:
                     continue
-            elif mention.about and anchors.get(mention.about):
-                found = anchors[mention.about]
-                subject = submissions.subject(
-                    person_id=found["person_id"],
-                    submission_id=found["submission_id"],
-                    label=found["label"],
-                )
-                if found.get("draft_id"):
-                    subject["draft_id"] = found["draft_id"]
-            elif mention.about:
-                continue  # nobody to hang it off; already reported above
             else:
-                subject = dict(about)
+                subject = subject_for(mention)
+                if subject is None:
+                    continue  # nobody to hang it off; already reported above
 
             kind = {
                 submissions.SIBLING: submissions.ADD_SIBLING,
@@ -1199,7 +1232,9 @@ async def on_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typed = update.effective_message.text or ""
     if dictation.looks_like_dictation(typed):
         reading = dictation.parse(
-            typed, subject_name=_subject_name_or_none(context)
+            typed,
+            subject_name=_subject_name_or_none(context),
+            known_names=await _known_names(update, context),
         )
         if reading:
             return await _absorb_dictation(update, context, reading)

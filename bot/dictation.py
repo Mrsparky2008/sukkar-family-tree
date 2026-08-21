@@ -405,6 +405,23 @@ def _names_in(
     return found
 
 
+def _known_owner(prefix: str, known: set[str]) -> str | None:
+    """Whether this fragment is just a possessive naming somebody we know."""
+    words = [
+        word.strip(understand.EDGE_PUNCTUATION)
+        for word in prefix.split()
+        if word.strip(understand.EDGE_PUNCTUATION).casefold() not in FILLER
+    ]
+    if len(words) != 1:
+        return None
+
+    bare = re.sub(r"[^a-z]", "", words[0].casefold())
+    for candidate in (bare, bare.rstrip("s")):
+        if candidate and candidate in known:
+            return _titled(candidate)
+    return None
+
+
 def _first_name_in(
     text: str, subject_name: str | None, family_names: set[str]
 ) -> tuple[str, str | None] | None:
@@ -426,8 +443,16 @@ def parse(
     text: str,
     default_role: str | None = None,
     subject_name: str | None = None,
+    known_names: set[str] | None = None,
 ) -> Reading:
-    """Read a message into people. Never raises; returns an empty Reading."""
+    """Read a message into people. Never raises; returns an empty Reading.
+
+    `known_names` are given names already in the tree or in the contributor's
+    basket. A line beginning with one of them is naming whose relatives come
+    next — "Kalims sisters are..." — rather than introducing somebody called
+    Kalims.
+    """
+    known = {name.casefold() for name in (known_names or set())}
     mentions: list[Mention] = []
     loose_notes: list[str] = []
     remarks: list[tuple[str | None, str]] = []
@@ -551,7 +576,15 @@ def parse(
         found = _role_at(line.casefold())
         if found is not None:
             current_role, current_sex, pair_expected, plural, start, end = found
-            remainder = (line[:start] + " " + line[end:]).strip(" :,-—")
+            prefix = line[:start].strip(" :,-—")
+            # "Kalims sisters are Dibeh and Sonia" — the word in front of the
+            # relationship is a possessive naming somebody we already know,
+            # not a relative called Kalims.
+            owner = _known_owner(prefix, known)
+            if owner is not None:
+                about = owner
+                prefix = ""
+            remainder = (prefix + " " + line[end:]).strip(" :,-—")
         else:
             remainder = line
 

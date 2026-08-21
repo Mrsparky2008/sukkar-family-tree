@@ -563,6 +563,76 @@ class SpellingReportTests(ReviewTestCase):
         self.assertIn("one family", output)
 
 
+class AnchorTests(ReviewTestCase):
+    """Which person in a submission an anchor means.
+
+    "Add my parents" creates two people but records one resulting_person_id.
+    Resolving the mother to the father put her parents on her husband and gave
+    her siblings the wrong pair — silently, and three generations deep.
+    """
+
+    def add_parents_of(self, person_id, father, mother):
+        sid = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, father, sex="M"),
+                S.person(S.MOTHER, mother, sex="F"),
+            ],
+            S.subject(person_id=person_id, label="child"),
+        )
+        review.approve(self.conn, sid, reviewed_by=1, force=True)
+        return sid
+
+    def person_named(self, name):
+        return [
+            row for row in db.get_people(self.conn) if row["given_name"] == name
+        ][0]
+
+    def test_both_parents_are_traceable_to_the_submission(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        sid = self.add_parents_of(child, "Tanios", "Zeina")
+        created = {p["given_name"] for p in db.people_from_submission(self.conn, sid)}
+        self.assertEqual(created, {"Tanios", "Zeina"})
+
+    def test_an_anchor_naming_the_mother_resolves_to_the_mother(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        first = self.add_parents_of(child, "Tanios", "Zeina")
+
+        # Now: "Zeina's parents are Semaan and Rima".
+        second = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Semaan", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+            S.subject(submission_id=first, label="Zeina"),
+        )
+        review.approve(self.conn, second, reviewed_by=1, force=True)
+
+        zeina = self.person_named("Zeina")
+        tanios = self.person_named("Tanios")
+        self.assertEqual(
+            db.get_person(self.conn, zeina["father_id"])["given_name"], "Semaan"
+        )
+        self.assertIsNone(tanios["father_id"], "the father inherited her parents")
+
+    def test_a_mothers_maiden_name_is_not_a_variant_of_her_husbands(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        sid = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Tanios", sex="M"),
+                S.person(S.MOTHER, "Zeina", sex="F", family_name="Taouk"),
+            ],
+            S.subject(person_id=child, label="Sami"),
+        )
+        review.approve(self.conn, sid, reviewed_by=1, force=True)
+
+        tanios = self.person_named("Tanios")
+        spellings = {c["spelling"] for c in db.spelling_claims(self.conn, tanios["id"])}
+        self.assertNotIn("Taouk", spellings)
+
+
 class ClosenessTests(ReviewTestCase):
     def test_a_person_is_no_distance_from_themselves(self):
         self.assertEqual(
@@ -658,8 +728,11 @@ class ProvenanceTests(ReviewTestCase):
 
         claims = db.provenance(self.conn, georges)
         self.assertEqual(len(claims), 2)
+        # The teller is named as they are called *now*, not as the label
+        # happened to read when they pressed send.
         self.assertEqual(
-            {c["told_by"] for c in claims}, {"Khalil", "Mariam"}
+            {c["told_by"] for c in claims},
+            {"Khalil Youssef Sukkar", "Mariam Khalil Sukkar"},
         )
 
     def test_the_closest_teller_comes_first(self):
@@ -669,7 +742,7 @@ class ProvenanceTests(ReviewTestCase):
         self.claim_about(georges, self.ids["khalil_y"], 111, "Khalil")
 
         claims = db.provenance(self.conn, georges)
-        self.assertEqual(claims[0]["told_by"], "Khalil")
+        self.assertEqual(claims[0]["told_by"], "Khalil Youssef Sukkar")
         self.assertLess(claims[0]["distance"], claims[1]["distance"])
 
     def test_second_hand_knowledge_is_recorded_as_such(self):
@@ -687,7 +760,7 @@ class ProvenanceTests(ReviewTestCase):
         self.claim_about(georges, self.ids["khalil_y"], 111, "Khalil")
 
         claims = db.provenance(self.conn, georges)
-        self.assertEqual(claims[0]["told_by"], "Khalil")
+        self.assertEqual(claims[0]["told_by"], "Khalil Youssef Sukkar")
         self.assertIsNone(claims[-1]["distance"])
 
     def test_approving_never_erases_what_was_submitted(self):

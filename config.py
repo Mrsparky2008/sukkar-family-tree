@@ -137,21 +137,37 @@ BRANCH_PALETTE = [
 # ---------------------------------------------------------------------------
 
 COLOURS = {
-    "background": "#faf8f4",
+    # A survey chart rather than a scrapbook: cool limestone ground, ink that
+    # reads as engraved, and cedar for the accent. Bsharri sits under the
+    # Qadisha valley and the cedars; nothing here is sepia by default.
+    "background": "#e8ecec",
     "surface": "#ffffff",
-    "text": "#2b2118",
-    "text_muted": "#6f665c",
-    "border": "#e0d8cc",
-    "accent": "#b07d3f",
-    "node_male": "#3d6b8f",
-    "node_female": "#a35a6b",
-    "node_unknown": "#8a8178",
-    "edge_parent": "#bdb4a7",
-    "edge_union": "#b07d3f",
-    "highlight": "#b07d3f",
-    "ok": "#3f7d4f",
-    "warn": "#b0783f",
-    "error": "#a3453d",
+    "text": "#141d1b",
+    "text_muted": "#5a6a65",
+    "border": "#c9d3d0",
+    "accent": "#2f6b52",
+    "node_male": "#35566b",
+    "node_female": "#7a4b5e",
+    "node_unknown": "#6b716e",
+    "edge_parent": "#93a29d",
+    "edge_union": "#b8863f",
+    "highlight": "#2f6b52",
+    "ok": "#2f6b52",
+    "warn": "#b8863f",
+    "error": "#9c4038",
+    # The same set for a dark viewer. Not an inversion — the ground goes to
+    # the colour of the valley at night and the accent lifts to stay legible.
+    "dark_background": "#0e1513",
+    "dark_surface": "#16211f",
+    "dark_text": "#e4ebe8",
+    "dark_text_muted": "#8e9d98",
+    "dark_border": "#2a3835",
+    "dark_accent": "#5fa583",
+    "dark_node_male": "#5b87a3",
+    "dark_node_female": "#b07d92",
+    "dark_node_unknown": "#8a918e",
+    "dark_edge_parent": "#4a5a56",
+    "dark_edge_union": "#d0a05c",
 }
 
 

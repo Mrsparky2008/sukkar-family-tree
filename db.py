@@ -85,6 +85,7 @@ _LATER_COLUMNS = {
     "people": {
         "family_name_self_reported": "INTEGER NOT NULL DEFAULT 0",
         "also_known_as": "TEXT",
+        "from_submission_id": "INTEGER",
     },
 }
 
@@ -368,14 +369,15 @@ def create_person(
     branch_id: int | None = None,
     notes: str | None = None,
     created_by_telegram_id: int | None = None,
+    from_submission_id: int | None = None,
 ) -> int:
     """Insert a person and return their id. Privileged — see the note above."""
     cursor = conn.execute(
         """
         INSERT INTO people (given_name, given_name_ar, also_known_as, family_name, sex,
                             father_id, mother_id, branch_id, notes,
-                            created_by_telegram_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            created_by_telegram_id, from_submission_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             given_name.strip(),
@@ -388,6 +390,7 @@ def create_person(
             branch_id,
             notes,
             created_by_telegram_id,
+            from_submission_id,
         ),
     )
     return int(cursor.lastrowid)
@@ -480,6 +483,14 @@ def spelling_claims(
             spelling = entry.get("family_name")
             if not spelling:
                 continue
+            # One payload can name several people. Only the entry that is
+            # actually this person says anything about how *their* name is
+            # spelled — a mother's maiden name is not a variant of her
+            # husband's surname.
+            if row is not None and entry.get("given_name", "").casefold() != (
+                row["given_name"] or ""
+            ).casefold():
+                continue
             if any(c["spelling"] == spelling for c in claims):
                 continue
             who = payload.get("submitted_by") or {}
@@ -522,6 +533,16 @@ def create_union(
         (partner_a_id, partner_b_id, notes),
     )
     return int(cursor.lastrowid)
+
+
+def people_from_submission(
+    conn: sqlite3.Connection, submission_id: int
+) -> list[sqlite3.Row]:
+    """Everyone a single submission created."""
+    return conn.execute(
+        PERSON_SELECT + " WHERE p.from_submission_id = ? ORDER BY p.id",
+        (submission_id,),
+    ).fetchall()
 
 
 def get_unions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
@@ -1240,6 +1261,16 @@ def closeness(distance: int | None) -> str:
     return _CLOSENESS.get(distance, f"{distance} steps away")
 
 
+def _teller_label(
+    conn: sqlite3.Connection, teller: dict[str, Any], teller_id: int | None, row
+) -> str:
+    if teller_id is not None:
+        person = get_person(conn, teller_id)
+        if person is not None:
+            return row_display_name(person)
+    return teller.get("label") or f"telegram {row['telegram_user_id']}"
+
+
 def provenance(conn: sqlite3.Connection, person_id: int) -> list[dict[str, Any]]:
     """Everything anyone has said about this person, closest teller first.
 
@@ -1257,6 +1288,13 @@ def provenance(conn: sqlite3.Connection, person_id: int) -> list[dict[str, Any]]
         payload = submission_payload(row)
         teller = payload.get("submitted_by") or {}
         teller_id = teller.get("person_id")
+        if teller_id is None:
+            # They had not been confirmed in the tree when they sent this, but
+            # they may have been since. Saying "not connected" about somebody
+            # plainly on the chart reads as a bug.
+            contributor = get_contributor(conn, row["telegram_user_id"])
+            if contributor is not None:
+                teller_id = contributor["linked_person_id"]
         distance = (
             relationship_distance(conn, teller_id, person_id)
             if teller_id is not None
@@ -1268,8 +1306,7 @@ def provenance(conn: sqlite3.Connection, person_id: int) -> list[dict[str, Any]]
                 "status": row["status"],
                 "when": row["created_at"],
                 "claim": payload,
-                "told_by": teller.get("label")
-                or f"telegram {row['telegram_user_id']}",
+                "told_by": _teller_label(conn, teller, teller_id, row),
                 "told_by_person_id": teller_id,
                 "heard_from": payload.get("source"),
                 "distance": distance,
