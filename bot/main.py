@@ -22,6 +22,7 @@ from telegram.ext import (
     CommandHandler,
     ConversationHandler,
     MessageHandler,
+    PicklePersistence,
     filters,
 )
 
@@ -126,11 +127,23 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
         # /start should always get you back to a working state, even from
         # halfway through a flow.
         allow_reentry=True,
+        # Survive restarts. A code update must never eat somebody's
+        # half-entered answers — the first live restart did exactly that, to
+        # the first live user, mid-question.
+        name="capture",
+        persistent=True,
     )
 
 
 def build_application(token: str | None = None) -> Application:
-    application = Application.builder().token(token or config.TELEGRAM_BOT_TOKEN).build()
+    state_path = config.DATABASE_PATH.parent / "bot-state.pickle"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    application = (
+        Application.builder()
+        .token(token or config.TELEGRAM_BOT_TOKEN)
+        .persistence(PicklePersistence(filepath=state_path))
+        .build()
+    )
     application.add_handler(build_conversation())
     application.add_handler(CommandHandler("share", handlers.share))
     application.add_handler(CommandHandler("help", handlers.help_command))
