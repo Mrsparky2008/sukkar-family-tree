@@ -435,6 +435,88 @@ class SpellingPrecedenceTests(ReviewTestCase):
         self.assertTrue(all(m["score"] >= 0.9 for m in matches[:2]))
 
 
+class BothSpellingsShownTests(ReviewTestCase):
+    """Where a name is genuinely written two ways, show both."""
+
+    def setUp(self):
+        super().setUp()
+        self.semaan = db.create_person(
+            self.conn, "Semaan", sex="M", family_name="Succar"
+        )
+        self.wadiha = db.create_person(
+            self.conn, "Wadiha", sex="F", family_name="Karam"
+        )
+        self.steven = db.create_person(
+            self.conn,
+            "Steven",
+            sex="M",
+            family_name="Sukar",
+            father_id=self.semaan,
+            mother_id=self.wadiha,
+        )
+
+    def test_one_spelling_shows_plainly(self):
+        self.assertEqual(
+            db.display_name_with_spellings(
+                self.conn, db.get_person(self.conn, self.steven)
+            ),
+            "Steven Semaan Sukar",
+        )
+
+    def test_a_second_spelling_is_shown_alongside(self):
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Steven", sex="M", family_name="Sukkar")],
+            S.subject(person_id=self.semaan, label="Semaan"),
+        )
+        review.merge(self.conn, sid, self.steven, reviewed_by=1)
+        self.assertEqual(
+            db.display_name_with_spellings(
+                self.conn, db.get_person(self.conn, self.steven)
+            ),
+            "Steven Semaan Sukar / Sukkar",
+        )
+
+    def test_the_name_rule_underneath_is_untouched(self):
+        """Constraint 3: still exactly one place a name gets built."""
+        row = db.get_person(self.conn, self.steven)
+        self.assertTrue(
+            db.display_name_with_spellings(self.conn, row).startswith(
+                db.row_display_name(row)
+            )
+        )
+
+    def test_same_parents_and_name_beats_a_different_surname(self):
+        matches = db.corroborate(
+            self.conn,
+            "Steven",
+            role="child",
+            subject_person_id=self.semaan,
+            family_name="Sukkar",
+            threshold=0.5,
+        )
+        self.assertEqual(matches[0]["person_id"], self.steven)
+        self.assertGreaterEqual(matches[0]["score"], 0.9)
+
+    def test_more_agreeing_relatives_means_more_confidence(self):
+        one = db.corroborate(
+            self.conn, "Stephen", role="child",
+            subject_person_id=self.semaan, threshold=0.0,
+        )
+        both = db.corroborate(
+            self.conn, "Stephen", role="sibling",
+            subject_person_id=db.create_person(
+                self.conn, "Tony", sex="M",
+                father_id=self.semaan, mother_id=self.wadiha,
+            ),
+            threshold=0.0,
+        )
+        self.assertGreater(
+            [m for m in both if m["person_id"] == self.steven][0]["score"],
+            [m for m in one if m["person_id"] == self.steven][0]["score"],
+        )
+
+
 class SpellingReportTests(ReviewTestCase):
     """A spelling is a border crossing, not a branch."""
 

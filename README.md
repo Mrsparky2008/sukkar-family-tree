@@ -227,10 +227,25 @@ Every spelling anyone claimed is kept and shown in the review queue, because
 the same man really is spelled differently on Lebanese and Australian paper
 and somebody searching either way should find him.
 
+### When both are true, show both
+
+Where a name is genuinely written two ways, the tree shows both rather than
+hiding that there was a choice:
+
+```
+Steven Semaan Sukar / Sukkar
+```
+
+The name rule underneath is untouched — this appends to what
+`display_name()` produced. Constraint 3 still holds: one place a name is
+built.
+
 None of this affects identity. Spelling is folded away before matching, so
-what actually identifies a person is their father, their siblings, and their
-children — which is why three records under three spellings still collide as
-one man.
+what actually identifies a person is their father, their mother, their
+siblings and their children. Two records with the same given name and the
+same parents are not two people, whatever the surname says — and each extra
+relative that agrees raises the confidence floor, so father *and* mother
+matching scores higher than either alone.
 
 ## Nothing is confirmed one name at a time
 

@@ -177,6 +177,27 @@ def row_display_name(row: sqlite3.Row) -> str:
     )
 
 
+def display_name_with_spellings(conn: sqlite3.Connection, row: sqlite3.Row) -> str:
+    """The display name, plus any other spelling recorded for this person.
+
+        Steven Semaan SPELLING-A / SPELLING-B
+
+    When the family name is genuinely written two ways — one country's paper
+    against another's — showing both beats picking one and hiding the fact
+    that there was a choice. Still one name rule underneath: this appends to
+    what `display_name()` produced, it never builds a name itself.
+    """
+    base = row_display_name(row)
+    others = [
+        claim["spelling"]
+        for claim in spelling_claims(conn, row["id"])
+        if claim["spelling"] != row["family_name"]
+    ]
+    if not others:
+        return base
+    return f"{base} / {' / '.join(dict.fromkeys(others))}"
+
+
 def _optional(row: sqlite3.Row, column: str) -> Any:
     """Read a column that may not be present in this particular query."""
     try:
@@ -1057,8 +1078,12 @@ def corroborate(
 
         if reasons:
             # A shared relative outweighs a shaky spelling: "Khaleel, brother
-            # of the same man" is the same person as "Khalil".
-            score = 0.5 + 0.5 * score
+            # of the same man" is the same person as "Khalil". And each extra
+            # relative that agrees raises the floor — two people with the same
+            # father, the same mother and the same given name are not two
+            # people, whatever the surname says.
+            floor = 0.5 + 0.1 * min(len(reasons) - 1, 3)
+            score = floor + (1 - floor) * score
 
         if family_name and row["family_name"]:
             if not same_family(family_name, row["family_name"], conn):

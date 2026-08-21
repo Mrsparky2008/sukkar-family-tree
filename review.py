@@ -405,7 +405,7 @@ def show_tree(conn: sqlite3.Connection) -> None:
         parents = " & ".join(
             db.row_display_name(p) for p in db.get_parents(conn, person["id"])
         )
-        line = f"  {db.row_display_name(person)}"
+        line = f"  {db.display_name_with_spellings(conn, person)}"
         if parents:
             line += f"   <- {parents}"
         print(line)
