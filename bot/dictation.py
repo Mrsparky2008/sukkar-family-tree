@@ -613,23 +613,11 @@ def parse(
         if current_role is None:
             continue
 
-        inline_spouses: list[_Name] = []
-        if MARRIAGE.search(remainder):
-            left, right = MARRIAGE.split(remainder, maxsplit=1)[:2]
-            remainder = left
-            right, spouse_note = _strip_notes(right)
-            if spouse_note:
-                loose_notes.append(spouse_note)
-            inline_spouses = _names_in(right, subject_name, family_names)
-
-        remainder, note = _strip_notes(remainder)
-        people = _names_in(remainder, subject_name, family_names, plural=plural)
-
-        if note and len(people) != 1:
-            loose_notes.append(note)
-            note = None
-
-        for index, person in enumerate(people):
+        # "Khalil, Hanna (John) married to Therese, Youssef married to Wafaq,
+        # Waleena, Rafqa" — marriages sit INSIDE the list, one per person, so
+        # each comma-segment carries its own. Splitting the whole line at the
+        # first "married to" once turned three sisters into Hanna's wives.
+        def add_person(person: _Name, index: int) -> Mention:
             role, sex = current_role, current_sex
             uncertain = []
             if pair_expected:
@@ -639,38 +627,73 @@ def parse(
                     "which of the two parents is the father, from the order "
                     "you listed them"
                 )
-            if person.maybe_two:
+            if person.maybe_two and not pair_expected:
                 uncertain.append(
                     f"whether {person.given} {person.family} is one person or two"
                 )
+            mention = Mention(
+                role=role,
+                given_name=person.given,
+                family_name=person.family,
+                sex=sex,
+                also_known_as=person.also_known_as,
+                note="; ".join(person.remarks) or None,
+                uncertain=uncertain,
+            )
+            add(mention)
+            return mention
+
+        def add_spouse_of(partner: Mention, person: _Name) -> None:
             add(
                 Mention(
-                    role=role,
+                    role=submissions.SPOUSE,
                     given_name=person.given,
                     family_name=person.family,
-                    sex=sex,
+                    sex=_opposite(partner.sex),
                     also_known_as=person.also_known_as,
-                    note="; ".join(person.remarks) or note,
-                    uncertain=uncertain,
+                    spouse_of=partner.label(),
+                    uncertain=["whether a husband or a wife was meant"]
+                    if _opposite(partner.sex)
+                    else [],
                 )
             )
 
-        if inline_spouses and mentions:
-            partner = mentions[-1]
-            for person in inline_spouses:
-                add(
-                    Mention(
-                        role=submissions.SPOUSE,
-                        given_name=person.given,
-                        family_name=person.family,
-                        sex=_opposite(partner.sex),
-                        also_known_as=person.also_known_as,
-                        spouse_of=partner.label(),
-                        uncertain=["whether a husband or a wife was meant"]
-                        if _opposite(partner.sex)
-                        else [],
-                    )
-                )
+        if MARRIAGE.search(remainder):
+            count = 0
+            for segment in remainder.split(","):
+                spouse_part = None
+                if MARRIAGE.search(segment):
+                    segment, spouse_part = MARRIAGE.split(segment, maxsplit=1)[:2]
+                segment, segment_note = _strip_notes(segment)
+                added_here: list[Mention] = []
+                for person in _names_in(segment, subject_name, family_names,
+                                        plural=plural):
+                    added_here.append(add_person(person, count))
+                    count += 1
+                if segment_note and len(added_here) == 1:
+                    added_here[0].note = segment_note
+                elif segment_note:
+                    loose_notes.append(segment_note)
+                if spouse_part and added_here:
+                    spouse_part, spouse_note = _strip_notes(spouse_part)
+                    if spouse_note:
+                        loose_notes.append(spouse_note)
+                    for person in _names_in(spouse_part, subject_name,
+                                            family_names):
+                        add_spouse_of(added_here[-1], person)
+            continue
+
+        remainder, note = _strip_notes(remainder)
+        people = _names_in(remainder, subject_name, family_names, plural=plural)
+
+        if note and len(people) != 1:
+            loose_notes.append(note)
+            note = None
+
+        for index, person in enumerate(people):
+            mention = add_person(person, index)
+            if note and len(people) == 1:
+                mention.note = mention.note or note
 
     return Reading(
         people=_resolve_titles(mentions),

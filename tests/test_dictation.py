@@ -332,3 +332,47 @@ class PossessiveSubjectTests(unittest.TestCase):
             "Zaher sisters are Dibeh and Sonia", known_names={"Kalim"}
         )
         self.assertIn("Zaher", [m.given_name for m in reading.people])
+
+
+class MarriagesInsideAListTests(unittest.TestCase):
+    """"A, B married to X, C married to Y, D and E" — one marriage per person."""
+
+    LINE = (
+        "Her siblings are Khalil, Hanna (John) married to Therese Taouk, "
+        "Youssef (Joe) married to Wafaq Rahme, Waleena, Rafqa and "
+        "Clemence (she became a nun)"
+    )
+
+    def setUp(self):
+        self.reading = dictation.parse(self.LINE, subject_name="Wadiha")
+
+    def test_every_sibling_stays_a_sibling(self):
+        siblings = [m.given_name for m in self.reading.people if m.role == S.SIBLING]
+        self.assertEqual(
+            siblings,
+            ["Khalil", "Hanna", "Youssef", "Waleena", "Rafqa", "Clemence"],
+        )
+
+    def test_each_spouse_attaches_to_their_own_partner(self):
+        spouses = {
+            m.spouse_of: m.given_name
+            for m in self.reading.people
+            if m.role == S.SPOUSE
+        }
+        self.assertEqual(
+            spouses, {"Hanna (John)": "Therese", "Youssef (Joe)": "Wafaq"}
+        )
+
+    def test_nobody_is_merged_with_their_own_spouse(self):
+        names = [m.given_name for m in self.reading.people]
+        self.assertNotIn("Youssef Wafaq", " ".join(names))
+
+    def test_the_nun_remark_stays_on_clemence(self):
+        clemence = [m for m in self.reading.people if m.given_name == "Clemence"][0]
+        self.assertIn("nun", clemence.note or "")
+
+    def test_a_parents_pair_is_never_flagged_as_maybe_two(self):
+        reading = dictation.parse("Wadiha is the daughter of Najib Haddad and Saide Taouk")
+        self.assertFalse(
+            [m for m in reading.people if any("one person" in u for u in m.uncertain)]
+        )
