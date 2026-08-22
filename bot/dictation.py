@@ -73,6 +73,7 @@ PAIR_WORDS = {"parents", "mother and father", "father and mother", "mum and dad"
 #: "Kalim's parents" names whose relatives these are — not a person to add.
 POSSESSIVE = re.compile(r"[’']s$|s[’']$", re.IGNORECASE)
 
+
 #: "Wadiha is the daughter of Najib and Saide" — the message names its own
 #: subject, and the two people after "of" are her parents, not more children.
 #: Read the other way round this sentence turns a woman into her own mother's
@@ -132,6 +133,13 @@ TITLES = {
     "sister", "sr", "brother", "br", "father", "fr", "mother", "saint", "st",
     "abouna", "sayedna", "monsignor", "bishop", "sheikh", "hajj", "hajji",
 }
+
+#: Single-word role phrases, for keeping stray ones out of name fragments.
+#: Words that double as religious titles stay — "Sister Clemence" must reach
+#: the title folding, which knows she is the Clemence already on the list.
+_ROLE_TOKENS = {
+    phrase for phrase, _r, _s, _p in ROLE_WORDS if " " not in phrase
+} - TITLES
 
 
 #: Notes worth keeping verbatim rather than discarding as filler.
@@ -420,6 +428,11 @@ def _names_in(
                 for word in words
                 if word
                 and word.casefold() not in FILLER
+                # Nobody is called Wife or Children. A stray role word left
+                # in a name fragment once created a person named "Wife" on
+                # the review screen; titles like "Sister Clemence" are folded
+                # separately, after parsing.
+                and word.casefold() not in _ROLE_TOKENS
                 and not word.isdigit()
                 and not POSSESSIVE.search(word)
                 and not _is_subject(word, subject_name)

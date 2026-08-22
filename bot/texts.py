@@ -255,6 +255,22 @@ SAME_PERSON = "Same person"
 DIFFERENT_PERSON = "No, different person"
 NOT_SURE = "Not sure"
 
+
+def ask_meant_yourself(name: str) -> str:
+    """They typed their own name in the third person. Usually themselves —
+    but half the family shares a handful of names, so ask, don't assume."""
+    return f"Quick check — by {name}, did you mean yourself?"
+
+
+MEANT_MYSELF = "Yes, that's me"
+MEANT_SOMEONE_ELSE = "No, a different {name}"
+
+SELF_MISREAD = (
+    "Righto — I've taken those out so they don't land on you. Tell me about "
+    "that {name} again with their father's name, so I know which {name} "
+    "you mean: \"{name} son of Tony married...\""
+)
+
 #: How a match reads inside the question.
 MATCH_PENDING_SUFFIX = " (added recently, waiting for review)"
 
@@ -398,7 +414,11 @@ REVIEW_EMPTY = "You haven't added anyone yet."
 
 SEND_ALL = "Send all {count}"
 
-EDIT_ASK = "What should {name} be?"
+EDIT_ASK = (
+    "Fixing {name}.\n\n"
+    "Type the correct first name and I'll swap it in — or remove the "
+    "whole line."
+)
 
 EDITED = "Changed to {name}."
 

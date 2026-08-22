@@ -111,6 +111,7 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             handlers.CLARIFY: [
                 CallbackQueryHandler(handlers.on_sex_button, pattern=r"^sexq:"),
                 CallbackQueryHandler(handlers.on_link_button, pattern=r"^linkq:"),
+                CallbackQueryHandler(handlers.on_self_button, pattern=r"^selfq:"),
                 cancel_button,
                 MessageHandler(TEXT_ANSWER, handlers.on_clarify_text),
             ],

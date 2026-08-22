@@ -633,7 +633,7 @@ class ReviewTests(BotTestCase):
         chat = await self.collect_two()
         await chat.tap("Review and send")
         await chat.tap("Ritta")
-        self.assertIn("What should Ritta be?", chat.text)
+        self.assertIn("Fixing Ritta", chat.text)
         await chat.say("Rita")
         self.assertIn("Rita", chat.text)
 
@@ -1107,6 +1107,8 @@ class BrotherOrSisterTests(BotTestCase):
             "Henri and Sabine"
         )
         self.assertNotIn("belong to", chat.transcript())
+        self.assertIn("did you mean yourself?", chat.text)
+        await chat.tap(texts.MEANT_MYSELF)
         self.assertIn("Is Henri your son or daughter?", chat.text)
         await chat.tap(texts.CHILD_SON)
         await chat.tap(texts.CHILD_DAUGHTER)

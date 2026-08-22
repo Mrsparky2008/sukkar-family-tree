@@ -72,6 +72,7 @@ CB_SEND_ALL = "sendall"
 CB_REMOVE = "remove"
 CB_SEX = "sexq"
 CB_LINK = "linkq"
+CB_SELF = "selfq"
 CB_TOUR = "tour"
 
 
@@ -1450,12 +1451,24 @@ async def _absorb_dictation(
             drafts_by_label.setdefault(submissions.person_label(entry), draft_id)
         return draft_id
 
+    #: Payloads that only exist because a message used the contributor's own
+    #: name in the third person. Usually that IS them — but half the family
+    #: shares a handful of names, so it gets asked, not assumed.
+    self_drafts: list[str] = []
+    self_name: str | None = None
+
+    def note_self_anchor(about_name: str | None, draft: str) -> None:
+        nonlocal self_name
+        if about_name and (anchors.get(about_name) or {}).get("is_self"):
+            self_drafts.append(draft)
+            self_name = self_name or about_name
+
     try:
         for owner, parents in parent_groups.items():
             subject = subject_for(parents[0])
             if subject is None:
                 continue  # nobody to hang them off; already reported above
-            stash(
+            parents_draft = stash(
                 submissions.build(
                     submissions.ADD_PARENTS,
                     submitted_by=submitted_by,
@@ -1464,6 +1477,7 @@ async def _absorb_dictation(
                     note=note,
                 )
             )
+            note_self_anchor(owner, parents_draft)
 
         for mention in others:
             if mention.role == submissions.SPOUSE and mention.spouse_of:
@@ -1512,6 +1526,7 @@ async def _absorb_dictation(
                 )
             )
             drafts_by_label[mention.label()] = draft_id
+            note_self_anchor(mention.about, draft_id)
     except ValueError as problem:
         log.warning("dictation rejected for %s: %s", user_id, problem)
         return await _show_menu(update, context, texts.ERROR)
@@ -1606,6 +1621,11 @@ async def _absorb_dictation(
             link_questions += 1
             break  # one question per payload is plenty
 
+    if self_drafts and self_name:
+        queue.insert(
+            0, {"type": "self", "name": self_name, "drafts": self_drafts}
+        )
+
     if queue:
         context.user_data["clarify_queue"] = queue
         context.user_data["clarify_lead"] = lead
@@ -1644,6 +1664,24 @@ async def _ask_next_clarify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _show_review(update, context, lead)
 
     item = queue[0]
+    if item["type"] == "self":
+        await _say(
+            update,
+            texts.ask_meant_yourself(item["name"]),
+            _kb(
+                [
+                    [_button(texts.MEANT_MYSELF, f"{CB_SELF}:yes")],
+                    [
+                        _button(
+                            texts.MEANT_SOMEONE_ELSE.format(name=item["name"]),
+                            f"{CB_SELF}:no",
+                        )
+                    ],
+                ]
+            ),
+        )
+        return CLARIFY
+
     if item["type"] == "link":
         await _say(
             update,
@@ -1725,6 +1763,34 @@ def _record_link(context: ContextTypes.DEFAULT_TYPE, answer: str) -> None:
         entry["not_person_id"] = item["person_id"]
 
 
+def _remove_drafts(context: ContextTypes.DEFAULT_TYPE, draft_ids: list[str]) -> None:
+    """Drop these drafts and everything anchored on them, however deep."""
+    basket = _basket(context)
+    doomed = set(draft_ids)
+    changed = True
+    while changed:
+        changed = False
+        for payload in list(basket):
+            anchored_on = (payload.get("about") or {}).get("draft_id")
+            if payload.get("_draft_id") in doomed or anchored_on in doomed:
+                doomed.add(payload.get("_draft_id"))
+                basket.remove(payload)
+                changed = True
+
+
+async def on_self_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    answer = update.callback_query.data.split(":", 1)[1]
+    queue = context.user_data.get("clarify_queue") or []
+    if not queue or queue[0].get("type") != "self":
+        return await _ask_next_clarify(update, context)
+    item = queue.pop(0)
+    if answer == "no":
+        _remove_drafts(context, item["drafts"])
+        await _say(update, texts.SELF_MISREAD.format(name=item["name"]))
+    return await _ask_next_clarify(update, context)
+
+
 async def on_sex_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     answer = update.callback_query.data.split(":", 1)[1]
@@ -1742,6 +1808,17 @@ async def on_clarify_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typed = update.effective_message.text or ""
     queue = context.user_data.get("clarify_queue") or []
     current = queue[0] if queue else {"type": "sex"}
+
+    if current["type"] == "self":
+        answer = understand.yes_no(typed)
+        if answer is None:
+            await _say(update, texts.SEX_NOT_UNDERSTOOD)
+            return CLARIFY
+        queue.pop(0)
+        if answer is False:
+            _remove_drafts(context, current["drafts"])
+            await _say(update, texts.SELF_MISREAD.format(name=current["name"]))
+        return await _ask_next_clarify(update, context)
 
     if current["type"] == "link":
         answer = understand.yes_no(typed)
