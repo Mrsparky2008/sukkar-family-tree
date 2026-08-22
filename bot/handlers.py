@@ -261,7 +261,7 @@ def _relation_of(
     the bot never listened; naming the relationship is what buys the
     confidence to keep typing."""
     note = cursor.get("note")
-    if note and note != "waiting for review":
+    if note and note not in ("waiting for review", "not sent yet"):
         return note
     payload, entry = _origin_of(context, cursor)
     if payload is None or entry is None:
@@ -1262,6 +1262,13 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if choice == submissions.CORRECTION:
         return await _start_correction(update, context)
 
+    # Siblings and children always go through the counted shortcut — how
+    # many, then exactly that many names — whichever button got them here.
+    if choice == submissions.ADD_SIBLING:
+        return await _start_counted(update, context, submissions.SIBLING)
+    if choice == submissions.ADD_CHILD:
+        return await _start_counted(update, context, submissions.CHILD)
+
     flow = flows.BY_KIND[choice]
     _begin(context, flow)
     await _prefill_own_father(update, context, flow)
@@ -1418,6 +1425,29 @@ async def _send(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
 
 async def _pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     candidates = await store.subject_candidates(update.effective_user.id)
+
+    # People still in the basket count too: somebody adds three brothers by
+    # count, then wants to give one of them a wife — he must be pickable
+    # before any admin has seen him.
+    seen = {c["label"] for c in candidates}
+    for payload in _basket(context):
+        for entry in payload.get("people") or []:
+            if entry.get("role") == submissions.SELF:
+                continue
+            label = submissions.person_label(entry)
+            if label in seen:
+                continue
+            seen.add(label)
+            candidates.append(
+                {
+                    "person_id": None,
+                    "submission_id": None,
+                    "draft_id": payload.get("_draft_id"),
+                    "label": label,
+                    "note": "not sent yet",
+                }
+            )
+
     if not candidates:
         return await _show_menu(update, context, texts.SWITCH_NOBODY)
 
@@ -1471,10 +1501,13 @@ async def on_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _show_menu(update, context, texts.ERROR)
     _set_cursor(context, targets.get(target_key))
 
+    if action == "sibling":
+        return await _start_counted(update, context, submissions.SIBLING)
+    if action == "child":
+        return await _start_counted(update, context, submissions.CHILD)
+
     flow = {
-        "sibling": flows.ADD_SIBLING,
         "spouse": flows.ADD_SPOUSE,
-        "child": flows.ADD_CHILD,
         "parents": flows.ADD_PARENTS,
     }[action]
     _begin(context, flow)
