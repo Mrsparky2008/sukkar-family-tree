@@ -508,9 +508,11 @@ class AddSiblingAndSpouseTests(BotTestCase):
         self.assertEqual(entry["sex"], "F")
 
     async def test_spouse_records_a_family_name(self):
+        """Khalil said he is a man at signup, so his spouse is a wife —
+        no husband-or-wife question, straight to her name."""
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_SPOUSE)
-        await chat.tap(texts.SPOUSE_WIFE)
+        self.assertIn("her first name", chat.text)
         await chat.say("Therese")
         await chat.say("Obeid")
         await self.send_basket(chat)
@@ -885,11 +887,12 @@ class ConstraintTests(BotTestCase):
 
 class RobustnessTests(BotTestCase):
     async def test_typing_instead_of_tapping_a_choice_re_asks(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_SPOUSE)
+        chat = Conversation(user_id=5310)
+        await chat.start()
+        await chat.say("Rima")
         await chat.say("a boy I think")
         self.assertIn(texts.NOT_UNDERSTOOD, chat.transcript())
-        self.assertIn(texts.ASK_SPOUSE_SEX, chat.text)
+        self.assertIn(texts.ASK_SELF_FAMILY, chat.text)
 
     async def test_empty_message_is_rejected_kindly(self):
         chat = await self.identified_as_khalil()
@@ -971,18 +974,20 @@ class UnderstandingTypedAnswersTests(BotTestCase):
     async def test_a_typed_choice_works_for_any_button_question(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_SPOUSE)
-        await chat.say("wife")
         await chat.say("Rita")
-        await chat.tap(texts.SKIP)
+        await chat.say("Obeid")
         await self.send_basket(chat)
-        self.assertEqual(self.queued()[0]["payload"]["people"][0]["sex"], "F")
+        entry = self.queued()[0]["payload"]["people"][0]
+        self.assertEqual(entry["sex"], "F")
+        self.assertEqual(entry["family_name"], "Obeid")
 
     async def test_gibberish_at_a_choice_still_re_asks(self):
-        chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_SPOUSE)
+        chat = Conversation(user_id=5311)
+        await chat.start()
+        await chat.say("Rima")
         await chat.say("qqqq zzz")
         self.assertIn(texts.NOT_UNDERSTOOD, chat.transcript())
-        self.assertIn(texts.ASK_SPOUSE_SEX, chat.text)
+        self.assertIn(texts.ASK_SELF_FAMILY, chat.text)
 
     async def test_dunno_counts_as_i_dont_know(self):
         chat = await self.fresh_contributor()

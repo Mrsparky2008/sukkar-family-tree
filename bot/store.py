@@ -60,6 +60,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         "label": row["display_label"] if row else None,
         "identify_submission_id": None,
         "father_given_name": None,
+        "sex": None,
     }
 
     if state["person_id"] is not None:
@@ -68,6 +69,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
             state["label"] = db.row_display_name(person)
             state["branch_id"] = person["branch_id"]
             state["father_given_name"] = person["father_given_name"]
+            state["sex"] = person["sex"]
         return state
 
     # Not linked to anyone yet. Their own identity may still be in the queue,
@@ -81,6 +83,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
                 if not state["label"]:
                     state["label"] = submissions.person_label(entries[0])
                 state["father_given_name"] = entries[0].get("father_given_name")
+                state["sex"] = entries[0].get("sex")
             break
 
     return state
@@ -362,6 +365,15 @@ def _person_father_given(conn: sqlite3.Connection, person_id: int) -> str | None
 async def person_father_given(person_id: int) -> str | None:
     """The recorded father's given name, if the tree has one."""
     return await _run(_person_father_given, person_id)
+
+
+def _person_sex(conn: sqlite3.Connection, person_id: int) -> str | None:
+    row = db.get_person(conn, person_id)
+    return row["sex"] if row is not None else None
+
+
+async def person_sex(person_id: int) -> str | None:
+    return await _run(_person_sex, person_id)
 
 
 def _person_given_if_male(conn: sqlite3.Connection, person_id: int) -> str | None:

@@ -959,6 +959,7 @@ async def on_tour_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     flow = flows.BY_KIND.get(kind, flows.ADD_PARENTS)
     _begin(context, flow)
     await _prefill_own_father(update, context, flow)
+    await _prefill_spouse_sex(update, context, flow)
     return await _ask(update, context)
 
 
@@ -980,6 +981,7 @@ async def on_tour_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         flow = flows.BY_KIND.get(kind or "", flows.ADD_PARENTS)
         _begin(context, flow)
         await _prefill_own_father(update, context, flow)
+        await _prefill_spouse_sex(update, context, flow)
         return await _ask(update, context)
 
     # Not a yes or a no — hopefully names. Read them like any dictation,
@@ -1272,7 +1274,42 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     flow = flows.BY_KIND[choice]
     _begin(context, flow)
     await _prefill_own_father(update, context, flow)
+    await _prefill_spouse_sex(update, context, flow)
     return await _ask(update, context)
+
+
+async def _subject_sex(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> str | None:
+    """The sex of whoever the cursor is on, wherever it was recorded."""
+    cursor = _cursor(context)
+    if cursor is None:
+        who = await store.contributor_state(update.effective_user.id)
+        return who.get("sex")
+    if cursor.get("person_id"):
+        return await store.person_sex(cursor["person_id"])
+    _payload, entry = _origin_of(context, cursor)
+    if entry is not None:
+        if entry.get("role") == submissions.FATHER:
+            return "M"
+        if entry.get("role") == submissions.MOTHER:
+            return "F"
+        return entry.get("sex")
+    return None
+
+
+async def _prefill_spouse_sex(update, context, flow) -> None:
+    """A man's spouse is a wife. Asking "husband or wife?" of somebody who
+    already said they are a man reads as not listening — the question
+    survives only when the subject's own sex is genuinely unknown."""
+    if flow.kind != submissions.ADD_SPOUSE:
+        return
+    sex = await _subject_sex(update, context)
+    opposite = {"M": "F", "F": "M"}.get(sex or "")
+    if opposite:
+        state = _state(context)
+        state["answers"]["sex"] = opposite
+        state["index"] = 1
 
 
 async def _prefill_own_father(update, context, flow) -> None:
@@ -1512,6 +1549,7 @@ async def on_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }[action]
     _begin(context, flow)
     await _prefill_own_father(update, context, flow)
+    await _prefill_spouse_sex(update, context, flow)
     return await _ask(update, context)
 
 
