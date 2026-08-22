@@ -83,6 +83,30 @@ def yes_no(text: str) -> bool | None:
     return None
 
 
+_MALE_WORDS = {
+    "m", "male", "man", "boy", "he", "him", "brother", "bro", "son",
+    "husband", "father", "guy",
+}
+
+_FEMALE_WORDS = {
+    "f", "female", "woman", "girl", "she", "her", "sister", "sis",
+    "daughter", "wife", "mother",
+}
+
+
+def sex_word(text: str) -> str | None:
+    """"brother", "a girl", "she's his sister" — "M", "F", or None.
+
+    Only when the words point one way: an answer mentioning both is not an
+    answer, it is a story, and stories get re-asked."""
+    words = set(re.sub(r"[^a-z ]+", " ", tidy(text).casefold()).split())
+    male = bool(words & _MALE_WORDS)
+    female = bool(words & _FEMALE_WORDS)
+    if male == female:
+        return None
+    return "M" if male else "F"
+
+
 def is_skip(text: str) -> bool:
     """Whether this reads as "I don't know"."""
     cleaned = tidy(text).casefold()

@@ -44,7 +44,8 @@ log = logging.getLogger(__name__)
     ASK_SOURCE,
     REVIEW,
     EDIT_VALUE,
-) = range(11)
+    ASK_SEX,
+) = range(12)
 
 # --- callback data ---------------------------------------------------------
 
@@ -68,6 +69,7 @@ CB_REVIEW = "menu:review"
 CB_EDIT = "edit"
 CB_SEND_ALL = "sendall"
 CB_REMOVE = "remove"
+CB_SEX = "sexq"
 
 
 # ===========================================================================
@@ -193,12 +195,140 @@ def _subject_name(context: ContextTypes.DEFAULT_TYPE) -> str:
     return cursor["label"] if cursor else texts.SUBJECT_YOU
 
 
+#: Payload role -> the kin table's (kind, fixed sex). Parents carry their sex
+#: in the role itself; everyone else carries it in the entry.
+_ROLE_KIN: dict[str, tuple[str, str | None]] = {
+    submissions.FATHER: ("parent", "M"),
+    submissions.MOTHER: ("parent", "F"),
+    submissions.SIBLING: ("sibling", None),
+    submissions.SPOUSE: ("partner", None),
+    submissions.CHILD: ("child", None),
+}
+
+
+def _is_self(about: dict[str, Any] | None, who: dict[str, Any]) -> bool:
+    """Whether a payload's subject is the contributor themselves."""
+    about = about or {}
+    if about.get("draft_id"):
+        return False
+    if about.get("person_id") and about["person_id"] == who.get("person_id"):
+        return True
+    if (
+        about.get("submission_id")
+        and about["submission_id"] == who.get("identify_submission_id")
+    ):
+        return True
+    return (about.get("label") or "") in ("themselves", who.get("label") or "")
+
+
+def _origin_of(
+    context: ContextTypes.DEFAULT_TYPE, cursor: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The basket payload and entry that introduced the cursor person."""
+    draft_id = cursor.get("draft_id")
+    if not draft_id:
+        return None, None
+    label = cursor.get("label") or ""
+    for payload in _basket(context):
+        if payload.get("_draft_id") != draft_id:
+            continue
+        for entry in payload.get("people") or []:
+            if label in (submissions.person_label(entry), entry.get("given_name")):
+                return payload, entry
+        return payload, None
+    return None, None
+
+
+def _relation_of(
+    context: ContextTypes.DEFAULT_TYPE,
+    who: dict[str, Any],
+    cursor: dict[str, Any],
+) -> str | None:
+    """"your brother", "Hanna's son" — how the cursor person relates back.
+
+    "Adding relatives for: Toufic" about somebody's own brother reads as if
+    the bot never listened; naming the relationship is what buys the
+    confidence to keep typing."""
+    note = cursor.get("note")
+    if note and note != "waiting for review":
+        return note
+    payload, entry = _origin_of(context, cursor)
+    if payload is None or entry is None:
+        return None
+    kind, fixed_sex = _ROLE_KIN.get(entry.get("role") or "", (None, None))
+    if kind is None:
+        return None
+    kin = texts.kin_word(kind, fixed_sex or entry.get("sex"))
+    about = payload.get("about") or {}
+    owner = None if _is_self(about, who) else (about.get("label") or "").split()[0]
+    return texts.relation_phrase(kin, owner or None)
+
+
+async def _recorded_parents(
+    context: ContextTypes.DEFAULT_TYPE,
+    who: dict[str, Any],
+    cursor: dict[str, Any] | None,
+    depth: int = 0,
+) -> list[str]:
+    """Given names of parents already recorded for the cursor person.
+
+    Recorded means anywhere: the tree, or still in this contributor's basket.
+    A brother shares his parents with whoever he is a brother of, so the
+    check follows one sibling hop — which is exactly the case that made the
+    menu offer to add a man's parents to the person who shares them."""
+    ref = cursor or {
+        "person_id": who.get("person_id"),
+        "submission_id": who.get("identify_submission_id"),
+        "label": who.get("label"),
+    }
+    names: list[str] = []
+    if ref.get("person_id"):
+        names += await store.person_parents(ref["person_id"])
+
+    for payload in _basket(context):
+        if payload.get("kind") != submissions.ADD_PARENTS:
+            continue
+        about = payload.get("about") or {}
+        aimed_here = (
+            (ref.get("draft_id") and about.get("draft_id") == ref["draft_id"])
+            or (ref.get("person_id") and about.get("person_id") == ref["person_id"])
+            or (cursor is None and _is_self(about, who))
+            or (
+                ref.get("label")
+                and not about.get("draft_id")
+                and about.get("label") == ref["label"]
+            )
+        )
+        if aimed_here:
+            names += [
+                entry["given_name"] for entry in payload.get("people") or []
+            ]
+
+    if not names and cursor is not None and depth < 3:
+        payload, _entry = _origin_of(context, cursor)
+        if payload is not None:
+            about = payload.get("about") or {}
+            if payload.get("kind") == submissions.ADD_SIBLING:
+                up = None if _is_self(about, who) else dict(about)
+                names = await _recorded_parents(context, who, up, depth + 1)
+            elif payload.get("kind") == submissions.ADD_CHILD:
+                # Their parent is the very person they were added under.
+                names = [
+                    part
+                    for part in [(about.get("label") or "").split()[0]]
+                    if part
+                ]
+    return list(dict.fromkeys(name for name in names if name))
+
+
 def _menu_keyboard(
-    subject: str | None = None, basket_size: int = 0
+    subject: str | None = None, basket_size: int = 0, hide_parents: bool = False
 ) -> InlineKeyboardMarkup:
     labels = texts.menu_labels(subject)
     rows = [
-        [_button(labels[key], f"{CB_MENU}:{flow.kind}")] for key, flow in flows.MENU
+        [_button(labels[key], f"{CB_MENU}:{flow.kind}")]
+        for key, flow in flows.MENU
+        if not (hide_parents and key == "parents")
     ]
     if basket_size:
         rows.insert(
@@ -214,12 +344,30 @@ async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: s
     _reset(context)
     cursor = _cursor(context)
     name = cursor["label"] if cursor else None
+
+    who = await store.contributor_state(update.effective_user.id)
+    relation = _relation_of(context, who, cursor) if cursor else None
+    parents = await _recorded_parents(context, who, cursor)
+    # Both parents down: offering to add them again reads as if the bot
+    # forgot, and answering would only manufacture a duplicate to review.
+    hide_parents = len(parents) >= 2
+
     parts = [lead] if lead else []
-    if name:
+    if name and relation:
+        parts.append(
+            texts.SUBJECT_HEADING_RELATED.format(name=name, relation=relation)
+        )
+    elif name:
         # Only worth saying when it is not the obvious default.
         parts.append(texts.SUBJECT_HEADING.format(name=name))
+    if hide_parents:
+        parts.append(texts.parents_already_down(name, " and ".join(parents[:2])))
     parts.append(texts.MENU_PROMPT)
-    await _say(update, "\n\n".join(parts), _menu_keyboard(name, len(_basket(context))))
+    await _say(
+        update,
+        "\n\n".join(parts),
+        _menu_keyboard(name, len(_basket(context)), hide_parents=hide_parents),
+    )
     return MENU
 
 
@@ -1030,10 +1178,13 @@ async def _absorb_dictation(
             notes=mention.note,
         )
 
+    stashed: list[dict[str, Any]] = []
+
     def stash(payload) -> str:
         draft_id = _draft_id(context)
         payload["_draft_id"] = draft_id
         _basket(context).append(payload)
+        stashed.append(payload)
         # Everyone in this payload can now anchor later lines and later
         # messages: "Kalim's parents are..." right after naming Kalim.
         for entry in payload.get("people") or []:
@@ -1117,7 +1268,114 @@ async def _absorb_dictation(
             texts.DICTATED_UNSURE_ONE if len(guesses) == 1 else texts.DICTATED_UNSURE
         )
         lead += template.format(reasons=", and ".join(guesses))
+
+    # "My siblings are Toufic and Nawal" — the word "siblings" never said who
+    # is a brother and who is a sister. Silence here draws the tree wrong
+    # quietly, so each nameless-sex person earns exactly one question.
+    queue: list[dict[str, Any]] = []
+    for payload in stashed:
+        kind_of = {
+            submissions.SIBLING: "sibling",
+            submissions.CHILD: "child",
+            submissions.SPOUSE: "partner",
+        }
+        about = payload.get("about") or {}
+        owner = (
+            None
+            if _is_self(about, who)
+            else (about.get("label") or "").split()[0] or None
+        )
+        for position, entry in enumerate(payload.get("people") or []):
+            kind = kind_of.get(entry.get("role") or "")
+            if kind and not entry.get("sex"):
+                queue.append(
+                    {
+                        "draft_id": payload["_draft_id"],
+                        "position": position,
+                        "name": entry["given_name"],
+                        "kind": kind,
+                        "owner": owner,
+                    }
+                )
+    if queue:
+        context.user_data["sex_queue"] = queue
+        context.user_data["sex_lead"] = lead
+        return await _ask_next_sex(update, context)
+
     return await _show_review(update, context, lead)
+
+
+# ===========================================================================
+# Brother or sister?
+# ===========================================================================
+#
+# Only for people dictated without a sex. The flows already ask; free text
+# is the one door somebody can walk through without ever saying.
+# ===========================================================================
+
+_SEX_BUTTONS = {
+    "sibling": (texts.SIBLING_BROTHER, texts.SIBLING_SISTER),
+    "child": (texts.CHILD_SON, texts.CHILD_DAUGHTER),
+    "partner": (texts.SPOUSE_HUSBAND, texts.SPOUSE_WIFE),
+}
+
+
+async def _ask_next_sex(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    queue = context.user_data.get("sex_queue") or []
+    if not queue:
+        context.user_data.pop("sex_queue", None)
+        lead = context.user_data.pop("sex_lead", None)
+        return await _show_review(update, context, lead)
+
+    item = queue[0]
+    male_label, female_label = _SEX_BUTTONS[item["kind"]]
+    await _say(
+        update,
+        texts.ask_person_sex(item["name"], item["owner"], item["kind"]),
+        _kb(
+            [
+                [_button(male_label, f"{CB_SEX}:M")],
+                [_button(female_label, f"{CB_SEX}:F")],
+                [_button(texts.SKIP, f"{CB_SEX}:skip")],
+            ]
+        ),
+    )
+    return ASK_SEX
+
+
+def _record_sex(context: ContextTypes.DEFAULT_TYPE, sex: str | None) -> None:
+    queue = context.user_data.get("sex_queue") or []
+    if not queue:
+        return
+    item = queue.pop(0)
+    if sex is None:
+        return
+    for payload in _basket(context):
+        if payload.get("_draft_id") == item["draft_id"]:
+            people = payload.get("people") or []
+            if item["position"] < len(people):
+                people[item["position"]]["sex"] = sex
+            return
+
+
+async def on_sex_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    answer = update.callback_query.data.split(":", 1)[1]
+    _record_sex(context, answer if answer in ("M", "F") else None)
+    return await _ask_next_sex(update, context)
+
+
+async def on_sex_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    typed = update.effective_message.text or ""
+    sex = understand.sex_word(typed)
+    if sex is not None:
+        _record_sex(context, sex)
+        return await _ask_next_sex(update, context)
+    if understand.is_skip(typed):
+        _record_sex(context, None)
+        return await _ask_next_sex(update, context)
+    await _say(update, texts.SEX_NOT_UNDERSTOOD)
+    return ASK_SEX
 
 
 # ===========================================================================

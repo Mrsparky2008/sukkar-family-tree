@@ -24,6 +24,8 @@ import config
 import db
 import submissions
 
+from bot import texts
+
 
 def _in_connection(work: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     conn = db.connect()
@@ -237,26 +239,31 @@ def _subject_candidates(
     contributor = db.get_contributor(conn, telegram_user_id)
     own_id = contributor["linked_person_id"] if contributor else None
 
+    def kin(row, kind: str) -> str:
+        # The note doubles as the menu heading ("Toufic — your brother"),
+        # which is what tells a contributor the bot knows who it is on.
+        return "your " + texts.kin_word(kind, row["sex"])
+
     if own_id is not None:
         add_person(db.get_person(conn, own_id), note="you")
         parents = db.get_parents(conn, own_id)
         for row in parents:
-            add_person(row)
+            add_person(row, note=kin(row, "parent"))
         for row in db.get_siblings(conn, own_id):
-            add_person(row)
+            add_person(row, note=kin(row, "sibling"))
         for row in db.get_partners(conn, own_id):
-            add_person(row)
+            add_person(row, note=kin(row, "partner"))
         for row in db.get_children(conn, own_id):
-            add_person(row)
+            add_person(row, note=kin(row, "child"))
         # The wider circle the sketch shows must also be addressable:
         # "add kids to #19" points at an uncle, not a sibling.
         for parent in parents:
             for row in db.get_parents(conn, parent["id"]):
-                add_person(row)
+                add_person(row, note=kin(row, "grandparent"))
             for sibling in db.get_siblings(conn, parent["id"]):
-                add_person(sibling)
+                add_person(sibling, note=kin(sibling, "parent_sibling"))
                 for partner in db.get_partners(conn, sibling["id"]):
-                    add_person(partner)
+                    add_person(partner, note=kin(partner, "parent_sibling"))
 
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=50):
         payload = db.submission_payload(row)
@@ -283,6 +290,15 @@ def _subject_candidates(
 
 async def subject_candidates(telegram_user_id: int) -> list[dict[str, Any]]:
     return await _run(_subject_candidates, telegram_user_id)
+
+
+def _person_parents(conn: sqlite3.Connection, person_id: int) -> list[str]:
+    return [row["given_name"] for row in db.get_parents(conn, person_id)]
+
+
+async def person_parents(person_id: int) -> list[str]:
+    """Given names of the recorded parents, for the menu to reason about."""
+    return await _run(_person_parents, person_id)
 
 
 def _corroboration(

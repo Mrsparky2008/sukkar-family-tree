@@ -81,6 +81,17 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.tap("Khalil Youssef")
         return chat
 
+    async def fresh_contributor(self, user_id: int = 5900) -> Conversation:
+        """A contributor the tree knows nothing about: father Fares at signup,
+        mother unrecorded — so "Add my parents" is still on the menu. Khalil's
+        parents are both seeded, which rightly hides that button for him."""
+        chat = Conversation(user_id=user_id)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Fares")
+        return chat
+
     async def send_basket(self, chat: Conversation):
         await chat.tap("Review and send")
         await chat.tap("Send all")
@@ -265,7 +276,7 @@ class FamilyNameTests(BotTestCase):
 
     async def test_a_mothers_maiden_name_is_never_learned_as_a_variant(self):
         """Only the "how do you spell OUR name" answer counts."""
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("Nada")
         await chat.say("Karam")
@@ -302,7 +313,7 @@ class FamilyNameTests(BotTestCase):
 
 class MenuTests(BotTestCase):
     async def test_menu_offers_every_option(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         self.assertEqual(
             set(chat.buttons),
             {
@@ -315,6 +326,15 @@ class MenuTests(BotTestCase):
                 texts.MENU_VIEW,
             },
         )
+
+    async def test_recorded_parents_are_not_offered_again(self):
+        """Khalil's parents are on the tree. Offering to add them reads as
+        if the bot forgot, and answering would only manufacture a duplicate."""
+        chat = await self.identified_as_khalil()
+        self.assertNotIn(texts.MENU_ADD_PARENTS, chat.buttons)
+        self.assertIn("already down", chat.text)
+        self.assertIn("Youssef", chat.text)
+        self.assertIn("Nada", chat.text)
 
     async def test_view_tree_says_so_when_unpublished(self):
         chat = await self.identified_as_khalil()
@@ -387,7 +407,7 @@ class AddChildTests(BotTestCase):
 class AddParentsTests(BotTestCase):
     async def test_the_father_is_not_asked_for_twice(self):
         """It was given at signup. Asking again reads as not listening."""
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         self.assertIn("mother", chat.text.lower())
 
@@ -396,8 +416,12 @@ class AddParentsTests(BotTestCase):
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
 
-        roles = {e["role"]: e for e in self.queued()[0]["payload"]["people"]}
-        self.assertEqual(roles["father"]["given_name"], "Youssef")
+        payload = [
+            q for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_PARENTS
+        ][0]
+        roles = {e["role"]: e for e in payload["payload"]["people"]}
+        self.assertEqual(roles["father"]["given_name"], "Fares")
         self.assertEqual(roles["mother"]["given_name"], "Nada")
 
     async def test_both_parents_when_the_father_is_unknown(self):
@@ -419,7 +443,7 @@ class AddParentsTests(BotTestCase):
         self.assertEqual(roles["mother"]["family_name"], "Karam")
 
     async def test_skipping_the_mother_skips_her_family_name_too(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         self.assertNotIn("before she married", chat.text)
@@ -476,18 +500,18 @@ class AddSiblingAndSpouseTests(BotTestCase):
 
 class ClimbTests(BotTestCase):
     async def test_the_cursor_follows_the_person_just_named(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("Nada")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CLIMB_YES)
-        self.assertIn("Youssef's father", chat.text)
+        self.assertIn("Fares's father", chat.text)
 
     async def test_three_generations_in_one_sitting(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)              # mother unknown
-        await chat.tap(texts.CLIMB_YES)         # now on Youssef
+        await chat.tap(texts.CLIMB_YES)         # now on Fares
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CLIMB_YES)         # now on Elias
@@ -501,15 +525,20 @@ class ClimbTests(BotTestCase):
             for q in self.queued()
             if q["payload"]["kind"] == submissions.ADD_PARENTS
         ]
-        self.assertEqual(names, ["Youssef", "Elias", "Semaan"])
+        self.assertEqual(names, ["Fares", "Elias", "Semaan"])
 
     async def test_the_chain_is_anchored_when_it_sends(self):
         """Each generation must point at the one below, not float free."""
         chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_PARENTS)
+        # His own parents are on the tree already; the open end is his wife's
+        # side, so the climb starts from her.
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap("Therese Obeid")
+        await chat.tap("parents")
+        await chat.say("Tanios")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CLIMB_YES)
-        await chat.say("Elias")
+        await chat.say("Boulos")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
@@ -518,23 +547,23 @@ class ClimbTests(BotTestCase):
             q for q in self.queued() if q["payload"]["kind"] == submissions.ADD_PARENTS
         ]
         first, second = parents[0], parents[1]
-        self.assertEqual(first["payload"]["about"]["person_id"], self.ids["khalil_y"])
+        self.assertEqual(first["payload"]["about"]["person_id"], self.ids["therese"])
         self.assertEqual(second["payload"]["about"]["submission_id"], first["id"])
         self.assertNotIn("draft_id", second["payload"]["about"])
 
     async def test_the_prompt_names_whoever_the_cursor_is_on(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CLIMB_YES)
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
         await chat.tap(texts.ADD_MORE)
-        # Declining the climb leaves the cursor where it was, on Youssef.
-        self.assertIn("Adding relatives for: Youssef", chat.text)
-        self.assertIn("Add Youssef's parents", chat.buttons)
-        await chat.tap("Add a brother or sister of Youssef")
-        self.assertIn("brother or a sister of Youssef", chat.text)
+        # Declining the climb leaves the cursor where it was, on Fares.
+        self.assertIn("Adding relatives for: Fares", chat.text)
+        self.assertIn("Add Fares's parents", chat.buttons)
+        await chat.tap("Add a brother or sister of Fares")
+        self.assertIn("brother or a sister of Fares", chat.text)
 
 
 class SwitchSubjectTests(BotTestCase):
@@ -611,7 +640,7 @@ class ReviewTests(BotTestCase):
 
     async def test_removing_a_parent_removes_what_hung_off_it(self):
         """Otherwise a grandfather is left anchored to nothing."""
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CLIMB_YES)
@@ -620,7 +649,7 @@ class ReviewTests(BotTestCase):
         await chat.tap(texts.ADD_MORE)
 
         await chat.tap("Review and send")
-        await chat.tap("1. Youssef")
+        await chat.tap("1. Fares")
         await chat.tap(texts.REMOVE)
         self.assertIn(texts.REVIEW_EMPTY, chat.transcript())
 
@@ -894,20 +923,20 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         self.assertIn(texts.ASK_CHILD_SEX, chat.text)
 
     async def test_dunno_counts_as_i_dont_know(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("dunno")
         self.assertIn(texts.CLIMB_YES, chat.buttons)
 
     async def test_ok_is_a_yes_at_the_climb(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.say("Ok")
-        self.assertIn("Youssef's father", chat.text)
+        self.assertIn("Fares's father", chat.text)
 
     async def test_nah_is_a_no_at_the_climb(self):
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.say("nah")
@@ -915,7 +944,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
 
     async def test_unclear_text_re_shows_the_question_with_its_buttons(self):
         """The old behaviour scolded and left them with no buttons at all."""
-        chat = await self.identified_as_khalil()
+        chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.say("hmm what")
@@ -943,6 +972,97 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         self.assertIn("Sami", chat.text)
         self.assertIn("Send all 1", " ".join(chat.buttons))
         self.assertEqual(self.queued(), [])
+
+
+class CursorAwarenessTests(BotTestCase):
+    """The menu must sound like it knows who it is pointed at."""
+
+    async def test_the_menu_names_the_relationship(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap("Georges Youssef")
+        self.assertIn("your brother", chat.text)
+
+    async def test_a_brothers_shared_parents_are_not_asked_for(self):
+        """"Add Toufic's parents" about your own brother reads as if the bot
+        does not know his parents are your parents."""
+        chat = await self.fresh_contributor()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("Wadiha")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+
+        await chat.tap(texts.MENU_ADD_SIBLING)
+        await chat.tap(texts.SIBLING_BROTHER)
+        await chat.say("Toufic")
+        await chat.tap(texts.CLIMB_YES)
+
+        self.assertIn("Toufic — your brother", chat.text)
+        self.assertNotIn("Add Toufic's parents", chat.buttons)
+        self.assertIn("already down", chat.text)
+        self.assertIn("Fares", chat.text)
+        self.assertIn("Wadiha", chat.text)
+
+    async def test_the_switch_list_says_who_everyone_is(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        offered = " ".join(chat.buttons)
+        self.assertIn("your father", offered)
+        self.assertIn("your wife", offered)
+
+
+class BrotherOrSisterTests(BotTestCase):
+    """"My siblings are Toufic and Nawal" never said who is which. Ask —
+    once per person — rather than draw the tree wrong quietly."""
+
+    async def test_a_dictated_sibling_with_no_sex_is_asked_about(self):
+        chat = await self.fresh_contributor()
+        await chat.say("My siblings are Toufic and Nawal")
+        self.assertIn("Is Toufic your brother or sister?", chat.text)
+        await chat.tap(texts.SIBLING_BROTHER)
+        self.assertIn("Is Nawal your brother or sister?", chat.text)
+        await chat.tap(texts.SIBLING_SISTER)
+        self.assertIn("Check the spelling", chat.text)
+
+        await chat.tap("Send all")
+        entries = [
+            q["payload"]["people"][0]
+            for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_SIBLING
+        ]
+        self.assertEqual([e["sex"] for e in entries], ["M", "F"])
+
+    async def test_a_named_brother_is_not_asked(self):
+        chat = await self.fresh_contributor()
+        await chat.say("My brothers Toufic and Youssef and sister Nawal")
+        self.assertNotIn("Is Toufic", chat.transcript())
+        self.assertIn("Check the spelling", chat.text)
+
+    async def test_a_typed_answer_is_understood(self):
+        chat = await self.fresh_contributor()
+        await chat.say("My siblings are Toufic and Nawal")
+        await chat.say("he's a boy")
+        self.assertIn("Is Nawal", chat.text)
+        await chat.say("sister")
+        self.assertIn("Check the spelling", chat.text)
+
+    async def test_skip_leaves_the_sex_unknown(self):
+        chat = await self.fresh_contributor()
+        await chat.say("My siblings are Toufic and Nawal")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.SIBLING_SISTER)
+        await chat.tap("Send all")
+        entries = [
+            q["payload"]["people"][0]
+            for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_SIBLING
+        ]
+        self.assertEqual([e.get("sex") for e in entries], [None, "F"])
+
+    async def test_children_are_asked_as_son_or_daughter(self):
+        chat = await self.identified_as_khalil()
+        await chat.say("My kids are Rohnda and Jason")
+        self.assertIn("Is Rohnda your son or daughter?", chat.text)
 
 
 class WiringTests(unittest.TestCase):

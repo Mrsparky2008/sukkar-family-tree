@@ -103,6 +103,11 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 cancel_button,
                 MessageHandler(TEXT_ANSWER, handlers.on_climb_text),
             ],
+            handlers.ASK_SEX: [
+                CallbackQueryHandler(handlers.on_sex_button, pattern=r"^sexq:"),
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_sex_text),
+            ],
             handlers.REVIEW: [
                 CallbackQueryHandler(handlers.on_edit_pick, pattern=r"^edit:"),
                 CallbackQueryHandler(handlers.on_send_all, pattern=r"^sendall$"),

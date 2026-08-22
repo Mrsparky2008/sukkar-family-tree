@@ -65,7 +65,38 @@ MENU_PROMPT = "What would you like to do?"
 #: The cursor. Every flow adds relatives *for* somebody, and that somebody
 #: starts as the contributor but moves as they work up the family.
 SUBJECT_HEADING = "Adding relatives for: {name}"
+#: When the bot knows how this person relates to the contributor, it says so.
+#: "Adding relatives for: Toufic" about your own brother reads as if the bot
+#: has no idea who he is — and a bot that sounds unsure invites doubt about
+#: everything already entered.
+SUBJECT_HEADING_RELATED = "Adding relatives for: {name} — {relation}"
 SUBJECT_YOU = "you"
+
+#: What a relative is called, by kind and sex. Lives here with the rest of
+#: the wording so every phrase the bot uses for kinship comes from one table.
+KIN_WORDS: dict[str, dict[str | None, str]] = {
+    "parent": {"M": "father", "F": "mother", None: "parent"},
+    "sibling": {"M": "brother", "F": "sister", None: "brother or sister"},
+    "partner": {"M": "husband", "F": "wife", None: "husband or wife"},
+    "child": {"M": "son", "F": "daughter", None: "child"},
+    "grandparent": {"M": "grandfather", "F": "grandmother", None: "grandparent"},
+    "parent_sibling": {"M": "uncle", "F": "aunt", None: "uncle or aunt"},
+}
+
+
+def kin_word(kind: str, sex: str | None) -> str:
+    words = KIN_WORDS[kind]
+    return words.get(sex) or words[None]
+
+
+def relation_phrase(kin: str, owner: str | None) -> str:
+    """"your brother" — or "Hanna's brother" when the cursor sits deeper in."""
+    return f"your {kin}" if not owner else f"{owner}'s {kin}"
+
+
+def parents_already_down(subject: str | None, parents: str) -> str:
+    whose = "Your" if not subject else f"{subject}'s"
+    return f"{whose} parents are already down: {parents}."
 
 MENU_SWITCH = "Somebody else in the family"
 
@@ -129,6 +160,17 @@ def ask_mother(subject: str | None) -> str:
 def ask_mother_family(subject: str | None) -> str:
     who = "your mother" if not subject else f"{subject}'s mother"
     return f"What was {who}'s family name before she married?"
+
+
+def ask_person_sex(name: str, owner: str | None, kind: str) -> str:
+    """"Is Nawal your brother or sister?" — asked only when a dictated list
+    never said. A name with no sex draws the tree wrong quietly, which is
+    worse than one more question."""
+    pair = f"{KIN_WORDS[kind]['M']} or {KIN_WORDS[kind]['F']}"
+    return f"Is {name} {possessive(owner)} {pair}?"
+
+
+SEX_NOT_UNDERSTOOD = "Just tap one of the buttons, or Skip if you're not sure."
 
 
 def ask_sibling_sex(subject: str | None) -> str:
