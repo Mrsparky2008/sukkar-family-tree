@@ -61,6 +61,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         "identify_submission_id": None,
         "father_given_name": None,
         "sex": None,
+        "telegram_user_id": telegram_user_id,
     }
 
     if state["person_id"] is not None:
@@ -486,6 +487,72 @@ async def own_submission_exists(
         about_person_id,
         about_submission_id,
         about_self,
+    )
+
+
+def _own_submission_payload(
+    conn: sqlite3.Connection, telegram_user_id: int, submission_id: int
+) -> dict | None:
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):
+        if row["id"] == submission_id:
+            return db.submission_payload(row)
+    return None
+
+
+async def own_submission_payload(
+    telegram_user_id: int, submission_id: int
+) -> dict | None:
+    """The payload of one of this contributor's own submissions — what lets
+    the menu keep knowing "Toufic — your brother" after his row is sent."""
+    return await _run(_own_submission_payload, telegram_user_id, submission_id)
+
+
+def _pending_payloads(conn: sqlite3.Connection, telegram_user_id: int) -> list[dict]:
+    """The contributor's own still-pending claims, as sketch food — so their
+    corner of the tree survives the moment their basket is sent."""
+    out = []
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):
+        if row["status"] != "pending":
+            continue
+        payload = db.submission_payload(row)
+        if payload.get("kind") in (submissions.CORRECTION, submissions.IDENTIFY):
+            continue
+        out.append(payload)
+    out.reverse()  # oldest first, the order they were told
+    return out
+
+
+async def pending_payloads(telegram_user_id: int) -> list[dict]:
+    return await _run(_pending_payloads, telegram_user_id)
+
+
+def _queued_parent_names(
+    conn: sqlite3.Connection,
+    telegram_user_id: int,
+    about_person_id: int | None,
+    about_submission_id: int | None,
+) -> list[str]:
+    names: list[str] = []
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):
+        payload = db.submission_payload(row)
+        if payload.get("kind") != submissions.ADD_PARENTS:
+            continue
+        about = payload.get("about") or {}
+        if (about_person_id and about.get("person_id") == about_person_id) or (
+            about_submission_id
+            and about.get("submission_id") == about_submission_id
+        ):
+            names += [e["given_name"] for e in payload.get("people") or []]
+    return names
+
+
+async def queued_parent_names(
+    telegram_user_id: int,
+    about_person_id: int | None = None,
+    about_submission_id: int | None = None,
+) -> list[str]:
+    return await _run(
+        _queued_parent_names, telegram_user_id, about_person_id, about_submission_id
     )
 
 

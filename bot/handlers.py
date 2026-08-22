@@ -134,6 +134,7 @@ async def _sketch_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
             taken.add(first)
     drawing = sketch.build(
         await store.approved_payloads(update.effective_user.id)
+        + await store.pending_payloads(update.effective_user.id)
         + list(_basket(context)),
         self_name=(who["label"] or "you").split(" (")[0],
         self_father=who.get("father_given_name"),
@@ -243,14 +244,38 @@ def _origin_of(
     for payload in _basket(context):
         if payload.get("_draft_id") != draft_id:
             continue
-        for entry in payload.get("people") or []:
-            if label in (submissions.person_label(entry), entry.get("given_name")):
-                return payload, entry
-        return payload, None
+        return payload, _entry_matching(payload, label)
     return None, None
 
 
-def _relation_of(
+def _entry_matching(
+    payload: dict[str, Any], label: str
+) -> dict[str, Any] | None:
+    for entry in payload.get("people") or []:
+        if label in (submissions.person_label(entry), entry.get("given_name")):
+            return entry
+    return None
+
+
+async def _origin_anywhere(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, cursor: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Like _origin_of, but a sent draft's payload is fetched from the queue —
+    confirmed batches send immediately, so that is where origins usually live."""
+    payload, entry = _origin_of(context, cursor)
+    if payload is not None:
+        return payload, entry
+    if cursor.get("submission_id"):
+        payload = await store.own_submission_payload(
+            update.effective_user.id, cursor["submission_id"]
+        )
+        if payload is not None and payload.get("kind") != submissions.IDENTIFY:
+            return payload, _entry_matching(payload, cursor.get("label") or "")
+    return None, None
+
+
+async def _relation_of(
+    update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     who: dict[str, Any],
     cursor: dict[str, Any],
@@ -263,7 +288,7 @@ def _relation_of(
     note = cursor.get("note")
     if note and note not in ("waiting for review", "not sent yet"):
         return note
-    payload, entry = _origin_of(context, cursor)
+    payload, entry = await _origin_anywhere(update, context, cursor)
     if payload is None or entry is None:
         return None
     kind, fixed_sex = _ROLE_KIN.get(entry.get("role") or "", (None, None))
@@ -276,6 +301,7 @@ def _relation_of(
 
 
 async def _recorded_parents(
+    update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     who: dict[str, Any],
     cursor: dict[str, Any] | None,
@@ -295,6 +321,17 @@ async def _recorded_parents(
     names: list[str] = []
     if ref.get("person_id"):
         names += await store.person_parents(ref["person_id"])
+    # Sent-but-unapproved parents count too — the basket empties the moment
+    # a batch is confirmed, so the queue is where the answer usually lives.
+    if cursor is None:
+        queued = list((await store.own_parent_names(who["telegram_user_id"])).values())
+    else:
+        queued = await store.queued_parent_names(
+            who["telegram_user_id"],
+            about_person_id=ref.get("person_id"),
+            about_submission_id=ref.get("submission_id"),
+        )
+    names += queued
 
     for payload in _basket(context):
         if payload.get("kind") != submissions.ADD_PARENTS:
@@ -316,12 +353,12 @@ async def _recorded_parents(
             ]
 
     if not names and cursor is not None and depth < 3:
-        payload, _entry = _origin_of(context, cursor)
+        payload, _entry = await _origin_anywhere(update, context, cursor)
         if payload is not None:
             about = payload.get("about") or {}
             if payload.get("kind") == submissions.ADD_SIBLING:
                 up = None if _is_self(about, who) else dict(about)
-                names = await _recorded_parents(context, who, up, depth + 1)
+                names = await _recorded_parents(update, context, who, up, depth + 1)
             elif payload.get("kind") == submissions.ADD_CHILD:
                 # Their parent is the very person they were added under.
                 names = [
@@ -357,8 +394,10 @@ async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: s
     name = cursor["label"] if cursor else None
 
     who = await store.contributor_state(update.effective_user.id)
-    relation = _relation_of(context, who, cursor) if cursor else None
-    parents = await _recorded_parents(context, who, cursor)
+    relation = (
+        await _relation_of(update, context, who, cursor) if cursor else None
+    )
+    parents = await _recorded_parents(update, context, who, cursor)
     # Both parents down: offering to add them again reads as if the bot
     # forgot, and answering would only manufacture a duplicate to review.
     hide_parents = len(parents) >= 2
@@ -567,6 +606,9 @@ async def on_person_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE
     payload["_draft_id"] = draft_id
     _basket(context).append(payload)
     _reset(context)
+    # Correct means sent. A review-then-send step after a per-person
+    # read-back is friction that strands data in baskets.
+    await _flush_basket(update, context)
     return await _after_add(update, context, payload)
 
 
@@ -583,6 +625,7 @@ async def on_person_confirm_text(update: Update, context: ContextTypes.DEFAULT_T
         payload["_draft_id"] = draft_id
         _basket(context).append(payload)
         _reset(context)
+        await _flush_basket(update, context)
         return await _after_add(update, context, payload)
     if answer is False:
         state = _state(context)
@@ -622,13 +665,14 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
 
     cursor = _cursor(context)
     role = entries[0]["role"]
-    draft_id = payload["_draft_id"]
+    draft_id = payload.get("_draft_id")
+    mapped = (context.user_data.get("draft_map") or {}).get(draft_id)
 
     def ref(entry) -> dict[str, Any]:
         return {
             "person_id": None,
-            "submission_id": None,
-            "draft_id": draft_id,
+            "submission_id": mapped,
+            "draft_id": None if mapped else draft_id,
             "label": submissions.person_label(entry),
         }
 
@@ -886,7 +930,7 @@ async def _tour_next(
             continue
         if side == "self":
             if step == "own_parents" and len(
-                await _recorded_parents(context, who, None)
+                await _recorded_parents(update, context, who, None)
             ) >= 2:
                 done.append(step)
                 continue
@@ -909,7 +953,7 @@ async def _tour_next(
         if found is None:
             continue
         if flow_kind == submissions.ADD_PARENTS and len(
-            await _recorded_parents(context, who, found)
+            await _recorded_parents(update, context, who, found)
         ) >= 2:
             done.append(step)
             continue
@@ -1226,6 +1270,7 @@ async def _counted_commit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         payload["_draft_id"] = _draft_id(context)
         _basket(context).append(payload)
         added += 1
+    await _flush_basket(update, context)
     return await _offer_tour(
         update, context, texts.ADDED.format(summary=f"{added} added")
     )
@@ -2444,34 +2489,60 @@ async def on_confirm_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _show_menu(update, context, texts.CANCELLED)
 
 
-async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Queue the whole basket, oldest first, resolving draft references."""
-    if update.callback_query is not None:
-        await update.callback_query.answer()
+async def _flush_basket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Queue everything collected, oldest first, resolving draft references.
+
+    The map from draft to submission id persists in user_data: a person sent
+    a minute ago can still anchor whoever gets added next.
+    """
     basket = _basket(context)
     if not basket:
-        return await _show_menu(update, context, texts.REVIEW_EMPTY)
-
+        return 0
     user_id = update.effective_user.id
-    draft_to_submission: dict[str, int] = {}
+    draft_to_submission: dict[str, int] = context.user_data.setdefault(
+        "draft_map", {}
+    )
     sent = 0
-
     for payload in basket:
-        about = payload.get("about") or {}
+        # Send a copy: the panel that follows still reads the original's
+        # draft id to build its "what next" targets.
+        to_send = dict(payload)
+        about = dict(to_send.get("about") or {})
+        to_send["about"] = about
         anchor = about.pop("draft_id", None)
         if anchor:
-            # The parent draft was sent a moment ago; point at its real row.
-            about["submission_id"] = draft_to_submission.get(anchor)
-        draft_id = payload.pop("_draft_id", None)
-
-        result = await store.queue(user_id, payload)
+            # The parent draft was sent already; point at its real row.
+            about["submission_id"] = about.get("submission_id") or (
+                draft_to_submission.get(anchor)
+            )
+        draft_id = to_send.pop("_draft_id", None)
+        result = await store.queue(user_id, to_send)
         if draft_id:
             draft_to_submission[draft_id] = result["submission_id"]
         sent += 1
-
     context.user_data["basket"] = []
-    context.user_data.pop("draft_counter", None)
-    _set_cursor(context, None)
+
+    # Anything still pointing at a draft — the cursor, the what-next targets —
+    # now points at the real submission instead.
+    def resolve(ref: dict[str, Any] | None) -> None:
+        if not ref:
+            return
+        draft = ref.get("draft_id")
+        if draft and draft in draft_to_submission:
+            ref["draft_id"] = None
+            ref["submission_id"] = draft_to_submission[draft]
+    resolve(context.user_data.get("subject"))
+    for target in (context.user_data.get("next_targets") or {}).values():
+        resolve(target)
+    return sent
+
+
+async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.callback_query is not None:
+        await update.callback_query.answer()
+    if not _basket(context):
+        return await _show_menu(update, context, texts.REVIEW_EMPTY)
+    await _flush_basket(update, context)
     return await _offer_tour(update, context, texts.SAVED)
 
 

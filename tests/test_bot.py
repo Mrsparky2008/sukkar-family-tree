@@ -97,10 +97,13 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         return chat
 
     async def send_basket(self, chat: Conversation):
+        """Confirmed batches send themselves; this mops up whatever remains."""
         if texts.CONFIRM_CORRECT in chat.buttons:
             await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap("Review and send")
-        await chat.tap("Send all")
+        if any("Review and send" in label for label in chat.buttons):
+            await chat.tap("Review and send")
+        if any("Send all" in label for label in chat.buttons):
+            await chat.tap("Send all")
 
 
 # ===========================================================================
@@ -634,30 +637,20 @@ class SwitchSubjectTests(BotTestCase):
 
 class ReviewTests(BotTestCase):
     async def collect_two(self):
+        """Dictation is where the pre-send review still lives — buttons send
+        on Correct, but a typed paragraph gets read back as a list first."""
         chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap("0")
-        await chat.tap("1")
-        await chat.say("Ritta")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap(texts.MENU_ADD_SIBLING)
-        await chat.tap("1")
-        await chat.tap("0")
-        await chat.tap(texts.YES_WORD)
-        await chat.say("Sami")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        return chat
+        await chat.say("My daughter Ritta and my brother Sami")
+        return chat  # sitting on the review screen, basket of 2, unsent
 
     async def test_review_lists_everything_collected(self):
         chat = await self.collect_two()
-        await chat.tap("Review and send")
         self.assertIn("Ritta", chat.text)
         self.assertIn("Sami", chat.text)
         self.assertIn("Send all 2", " ".join(chat.buttons))
 
     async def test_a_misspelling_can_be_corrected_before_it_sends(self):
         chat = await self.collect_two()
-        await chat.tap("Review and send")
         await chat.tap("Ritta")
         self.assertIn("Fixing Ritta", chat.text)
         await chat.say("Rita")
@@ -670,7 +663,6 @@ class ReviewTests(BotTestCase):
 
     async def test_an_entry_can_be_removed(self):
         chat = await self.collect_two()
-        await chat.tap("Review and send")
         await chat.tap("Sami")
         await chat.tap(texts.REMOVE)
         await chat.tap("Send all")
@@ -682,42 +674,24 @@ class ReviewTests(BotTestCase):
     async def test_removing_a_parent_removes_what_hung_off_it(self):
         """Otherwise a grandfather is left anchored to nothing."""
         chat = await self.fresh_contributor()
-        await chat.tap(texts.MENU_ADD_PARENTS)
-        await chat.tap(texts.SKIP)
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
-        await chat.say("Elias")
-        await chat.tap(texts.SKIP)
-        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.say("My mother is Nada")
         await chat.tap(texts.ADD_MORE)
-
-        await chat.tap("Review and send")
-        await chat.tap("1. Fares")
+        await chat.say("Nada's parents are Elias and Salma")
+        await chat.tap("1. Nada")
         await chat.tap(texts.REMOVE)
         self.assertIn(texts.REVIEW_EMPTY, chat.transcript())
 
     async def test_the_basket_survives_going_back_for_more(self):
         chat = await self.collect_two()
-        await chat.tap("Review and send")
         await chat.tap(texts.ADD_MORE)
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap("1")
-        await chat.tap("0")
-        await chat.say("Tanios")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap("Review and send")
+        await chat.say("My son Tanios")
         self.assertIn("Send all 3", " ".join(chat.buttons))
 
     async def test_sending_empties_the_basket(self):
         chat = await self.collect_two()
-        await self.send_basket(chat)
+        await chat.tap("Send all")
         self.assertEqual(len(self.queued()), 2)
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap("1")
-        await chat.tap("0")
-        await chat.say("Tanios")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap("Review and send")
+        await chat.say("My son Tanios")
         self.assertIn("Send all 1", " ".join(chat.buttons))
 
 
@@ -1021,23 +995,13 @@ class UnderstandingTypedAnswersTests(BotTestCase):
 
     async def test_typing_send_at_the_review_screen_sends(self):
         chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap("1")
-        await chat.tap("0")
-        await chat.say("Sami")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap("Review and send")
+        await chat.say("My son Sami")
         await chat.say("yes")
         self.assertEqual(len(self.queued()), 1)
 
     async def test_unclear_text_at_the_review_screen_re_shows_the_list(self):
         chat = await self.identified_as_khalil()
-        await chat.tap(texts.MENU_ADD_CHILD)
-        await chat.tap("1")
-        await chat.tap("0")
-        await chat.say("Sami")
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap("Review and send")
+        await chat.say("My son Sami")
         await chat.say("what is this")
         self.assertIn("Sami", chat.text)
         self.assertIn("Send all 1", " ".join(chat.buttons))
@@ -1351,10 +1315,6 @@ class CountedCaptureTests(BotTestCase):
         self.assertIn("Nawal is your sister", chat.text)
         self.assertIn("their father is Fares", chat.text)
         await chat.tap(texts.CONFIRM_CORRECT)
-
-        await chat.tap(texts.TOUR_MENU)
-        await chat.tap("Review and send")
-        await chat.tap("Send all")
         entries = [
             q["payload"]["people"][0]
             for q in self.queued()
