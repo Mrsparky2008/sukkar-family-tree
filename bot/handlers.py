@@ -1179,6 +1179,29 @@ async def _absorb_dictation(
             notes=mention.note,
         )
 
+    async def shared_father(subject: dict[str, Any]) -> str | None:
+        """What the subject's own record calls their father.
+
+        A sibling shares it, which is what lets two contributors' unapproved
+        claims about the same person find each other: a brother enters "my
+        sibling Nawal", later Nawal enters "my siblings are..." — different
+        subjects, same father."""
+        if subject.get("draft_id"):
+            return None
+        if subject.get("person_id"):
+            found = await store.person_father_given(subject["person_id"])
+            if found:
+                return found
+        if _is_self(subject, who):
+            return who.get("father_given_name")
+        return None
+
+    async def subject_as_father(subject: dict[str, Any]) -> str | None:
+        """The subject's own name, when a man's children are being listed."""
+        if subject.get("person_id"):
+            return await store.person_given_if_male(subject["person_id"])
+        return None
+
     stashed: list[dict[str, Any]] = []
 
     def stash(payload) -> str:
@@ -1239,12 +1262,18 @@ async def _absorb_dictation(
                 submissions.CHILD: submissions.ADD_CHILD,
                 submissions.SPOUSE: submissions.ADD_SPOUSE,
             }[mention.role]
+            entry = entry_of(mention)
+            if not entry.get("father_given_name"):
+                if kind == submissions.ADD_SIBLING:
+                    entry["father_given_name"] = await shared_father(subject)
+                elif kind == submissions.ADD_CHILD:
+                    entry["father_given_name"] = await subject_as_father(subject)
             draft_id = stash(
                 submissions.build(
                     kind,
                     submitted_by=submitted_by,
                     about=subject,
-                    people=[entry_of(mention)],
+                    people=[entry],
                     note=note,
                 )
             )

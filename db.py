@@ -1167,7 +1167,24 @@ def corroborate(
                 reasons.append(
                     f"someone else described the same {role} of the same person"
                 )
-                score = 0.5 + 0.5 * score
+
+            # Two contributors rarely hang the same person off the same
+            # subject — a brother describes "my sibling Nawal", and later
+            # Nawal describes herself. What they DO both know is the
+            # father, so an agreeing father is what links the claims
+            # before any admin has approved either.
+            if father_given_name and entry.get("father_given_name"):
+                if (
+                    name_similarity(father_given_name, entry["father_given_name"])
+                    >= 0.85
+                ):
+                    reasons.append(
+                        f"father also given as {entry['father_given_name']}"
+                    )
+
+            if reasons:
+                floor = 0.5 + 0.1 * min(len(reasons) - 1, 3)
+                score = floor + (1 - floor) * score
 
             if score >= cutoff:
                 results.append(

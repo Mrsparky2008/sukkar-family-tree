@@ -352,6 +352,27 @@ async def person_parents(person_id: int) -> list[str]:
     return await _run(_person_parents, person_id)
 
 
+def _person_father_given(conn: sqlite3.Connection, person_id: int) -> str | None:
+    for row in db.get_parents(conn, person_id):
+        if row["sex"] == "M":
+            return row["given_name"]
+    return None
+
+
+async def person_father_given(person_id: int) -> str | None:
+    """The recorded father's given name, if the tree has one."""
+    return await _run(_person_father_given, person_id)
+
+
+def _person_given_if_male(conn: sqlite3.Connection, person_id: int) -> str | None:
+    row = db.get_person(conn, person_id)
+    return row["given_name"] if row is not None and row["sex"] == "M" else None
+
+
+async def person_given_if_male(person_id: int) -> str | None:
+    return await _run(_person_given_if_male, person_id)
+
+
 def _corroboration(
     conn: sqlite3.Connection,
     given_name: str,

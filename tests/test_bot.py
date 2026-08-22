@@ -1132,6 +1132,40 @@ class LinkQuestionTests(BotTestCase):
         entry = self.queued()[-1]["payload"]["people"][0]
         self.assertIn("same_submission_id", entry)
 
+    async def test_the_link_fires_before_any_admin_has_approved_anything(self):
+        """One person enters their siblings; later a sibling signs up and
+        enters the family from her side. Different subjects, nothing
+        approved — the shared father is what ties the claims together."""
+        first = Conversation(user_id=6001)
+        await first.start()
+        await first.say("Steven")
+        await first.tap(config.FAMILY_NAME)
+        await first.say("Kalim")
+        await first.say("My brother Joseph and sister Nawal")
+        await first.tap("Send all")
+
+        second = Conversation(user_id=6002)
+        await second.start()
+        await second.say("Nawal")
+        await second.tap(config.FAMILY_NAME)
+        await second.say("Kalim")
+        await second.say("My brothers Steven and Joseph")
+
+        self.assertIn("Is this the same person as Steven", second.text)
+        self.assertIn("waiting for review", second.text)
+        await second.tap(texts.SAME_PERSON)
+        self.assertIn("Is this the same person as Joseph", second.text)
+        await second.tap(texts.SAME_PERSON)
+        await second.tap("Send all")
+
+        linked = [
+            q["payload"]["people"][0].get("same_submission_id")
+            for q in self.queued()
+            if q["telegram_user_id"] == 6002
+            and q["payload"]["kind"] == submissions.ADD_SIBLING
+        ]
+        self.assertTrue(all(linked), linked)
+
     async def test_a_bare_shared_name_is_not_interrogated(self):
         """Half the family answers to the same given names. No relational
         evidence, no question."""
