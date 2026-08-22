@@ -344,165 +344,163 @@ const PEOPLE = new Map(DATA.people.map(p => [p.id, p]));
 const BRANCHES = new Map(DATA.branches.map(b => [b.id, b]));
 
 /* ---------------------------------------------------------------------------
-   Generations.
+   Layout — the printed-genealogy convention.
 
-   A person sits one row below their lowest-placed parent. Spouses are pulled
-   onto the same row so a marriage reads across rather than diagonally. Cousin
-   marriages leave marriage lines that cross the chart — that is not a fault in
-   the drawing, it is the shape of this family.
+   Descent lines only. Every couple stands together behind a double bar, and
+   their children hang beneath them. A woman who married WITHIN the chart is
+   drawn twice: once among her siblings in her birth family, once beside her
+   husband — the same number on both cards, because she is one person. The
+   graph underneath stays a graph; this is only how it is drawn.
 --------------------------------------------------------------------------- */
-
-function assignRows() {
-  const row = new Map();
-  DATA.people.forEach(p => row.set(p.id, 0));
-
-  for (let pass = 0; pass < 24; pass++) {
-    let moved = false;
-    for (const person of DATA.people) {
-      for (const parentId of [person.father, person.mother]) {
-        if (parentId == null) continue;
-        const want = (row.get(parentId) ?? 0) + 1;
-        if (want > row.get(person.id)) { row.set(person.id, want); moved = true; }
-      }
-    }
-    for (const [a, b] of DATA.unions) {
-      const highest = Math.max(row.get(a) ?? 0, row.get(b) ?? 0);
-      if (row.get(a) !== highest) { row.set(a, highest); moved = true; }
-      if (row.get(b) !== highest) { row.set(b, highest); moved = true; }
-    }
-    if (!moved) break;
-  }
-  return row;
-}
-
-const ROW = assignRows();
-
-/* Order within each row.
-
-   Walking down from the eldest, depth first, keeps a family contiguous: a man,
-   then his wife, then his children, before the chart moves on to his brother.
-   That is what stops descent lines swooping across the whole width. A few
-   barycentre sweeps afterwards tidy the crossings that remain — and with
-   cousins marrying cousins, some crossings are simply true. */
-
-function assignColumns() {
-  const rows = new Map();
-  const partners = new Map();
-  const kids = new Map();
-
-  for (const person of DATA.people) {
-    const r = ROW.get(person.id);
-    if (!rows.has(r)) rows.set(r, []);
-    for (const parentId of [person.father, person.mother]) {
-      if (parentId == null) continue;
-      if (!kids.has(parentId)) kids.set(parentId, []);
-      if (!kids.get(parentId).includes(person.id)) kids.get(parentId).push(person.id);
-    }
-  }
-  for (const [a, b] of DATA.unions) {
-    if (!partners.has(a)) partners.set(a, []);
-    if (!partners.has(b)) partners.set(b, []);
-    partners.get(a).push(b);
-    partners.get(b).push(a);
-  }
-
-  const seen = new Set();
-  function place(id) {
-    if (seen.has(id)) return;
-    seen.add(id);
-    rows.get(ROW.get(id)).push(id);
-    for (const mate of partners.get(id) ?? []) {
-      if (!seen.has(mate) && ROW.get(mate) === ROW.get(id)) {
-        seen.add(mate);
-        rows.get(ROW.get(mate)).push(mate);
-      }
-    }
-    const descendants = new Set(kids.get(id) ?? []);
-    for (const mate of partners.get(id) ?? []) {
-      for (const kid of kids.get(mate) ?? []) descendants.add(kid);
-    }
-    for (const kid of [...descendants].sort((x, y) => x - y)) place(kid);
-  }
-
-  const roots = DATA.people
-    .filter(p => p.father == null && p.mother == null)
-    .sort((x, y) => ROW.get(x.id) - ROW.get(y.id) || x.id - y.id);
-  for (const root of roots) place(root.id);
-  for (const person of DATA.people) place(person.id);
-
-  const order = new Map();
-  const sorted = [...rows.keys()].sort((x, y) => x - y);
-  for (const r of sorted) rows.get(r).forEach((id, i) => order.set(id, i));
-
-  /* Sweeping people individually pulls married couples apart: each is dragged
-     toward their own parents, and they end up at opposite ends of the row. So
-     a couple is ordered as one unit and expanded again afterwards. */
-
-  function unitsFor(r) {
-    const made = [];
-    const used = new Set();
-    for (const id of rows.get(r)) {
-      if (used.has(id)) continue;
-      const unit = [id];
-      used.add(id);
-      for (const mate of partners.get(id) ?? []) {
-        if (!used.has(mate) && ROW.get(mate) === r) { unit.push(mate); used.add(mate); }
-      }
-      made.push(unit);
-    }
-    return made;
-  }
-
-  for (let sweep = 0; sweep < 8; sweep++) {
-    const downward = sweep % 2 === 0;
-    const pass = downward ? sorted : [...sorted].reverse();
-    for (const r of pass) {
-      const units = unitsFor(r);
-      const pull = new Map();
-      units.forEach((unit, index) => {
-        const anchors = [];
-        for (const id of unit) {
-          const person = PEOPLE.get(id);
-          if (downward) {
-            for (const pid of [person.father, person.mother]) {
-              if (pid != null && order.has(pid)) anchors.push(order.get(pid));
-            }
-          } else {
-            for (const kid of kids.get(id) ?? []) {
-              if (order.has(kid)) anchors.push(order.get(kid));
-            }
-          }
-        }
-        pull.set(unit, anchors.length
-          ? anchors.reduce((a, b) => a + b, 0) / anchors.length
-          : order.get(unit[0]) ?? index);
-      });
-      units.sort((a, b) => pull.get(a) - pull.get(b) || order.get(a[0]) - order.get(b[0]));
-      const flat = units.flat();
-      rows.set(r, flat);
-      flat.forEach((id, i) => order.set(id, i));
-    }
-  }
-
-  return { order, rows, sorted, partners };
-}
-
-const { order, rows, sorted, partners } = assignColumns();
 
 const COL_W = 124, ROW_H = 138, NODE_W = 104, NODE_H = 42;
 
-const POS = new Map();
-for (const r of sorted) {
-  const members = rows.get(r);
-  const width = members.length * COL_W;
-  members.forEach((id, i) => {
-    POS.set(id, { x: i * COL_W - width / 2 + COL_W / 2, y: r * ROW_H });
-  });
+const hasParents = id => {
+  const p = PEOPLE.get(id);
+  return p && (PEOPLE.has(p.father) || PEOPLE.has(p.mother));
+};
+
+/* Who stands at the head of each union: the partner with a birth family in
+   the chart; both or neither, the husband. The other becomes the consort. */
+const consorts = new Map();      // anchor -> [partnerIds]
+const anchorOfUnion = new Map(); // "a+b" -> anchorId
+for (const [a, b] of DATA.unions) {
+  if (!PEOPLE.has(a) || !PEOPLE.has(b)) continue;
+  let anchor = a, other = b;
+  const ap = hasParents(a), bp = hasParents(b);
+  if (ap !== bp) { anchor = ap ? a : b; }
+  else if (PEOPLE.get(b).sex === "M" && PEOPLE.get(a).sex !== "M") { anchor = b; }
+  other = anchor === a ? b : a;
+  if (!consorts.has(anchor)) consorts.set(anchor, []);
+  consorts.get(anchor).push(other);
+  anchorOfUnion.set([a, b].sort((x, y) => x - y).join("+"), anchor);
 }
 
-/* ---------------------------------------------------------------------------
-   Drawing
---------------------------------------------------------------------------- */
+const marriedOut = new Map();    // personId -> the anchor they stand beside
+for (const [anchor, list] of consorts) {
+  for (const partner of list) {
+    if (hasParents(partner)) marriedOut.set(partner, anchor);
+  }
+}
+
+/* Children hang under whichever parent heads a union; father failing that. */
+const childrenOf = new Map();
+for (const person of DATA.people) {
+  let parent = PEOPLE.has(person.father) ? person.father
+             : PEOPLE.has(person.mother) ? person.mother : null;
+  if (parent == null) continue;
+  const father = person.father, mother = person.mother;
+  if (father != null && mother != null) {
+    const key = [father, mother].sort((x, y) => x - y).join("+");
+    if (anchorOfUnion.has(key)) parent = anchorOfUnion.get(key);
+  }
+  if (!childrenOf.has(parent)) childrenOf.set(parent, []);
+  childrenOf.get(parent).push(person.id);
+}
+
+function kidsOfPair(anchor) {
+  const seen = new Set(childrenOf.get(anchor) || []);
+  for (const partner of consorts.get(anchor) || []) {
+    for (const kid of childrenOf.get(partner) || []) seen.add(kid);
+  }
+  return [...seen].sort((x, y) => x - y);
+}
+
+/* PLACEMENTS: every card on the chart. One person may own several. */
+const PLACEMENTS = [];
+const placed = new Set();
+
+function layout(anchor, gen, x0) {
+  if (placed.has("a" + anchor)) return 0;
+  placed.add("a" + anchor);
+
+  const pair = [anchor, ...(consorts.get(anchor) || [])];
+  const pairW = pair.length * COL_W;
+  const kids = kidsOfPair(anchor);
+
+  let kidsW = 0;
+  const kidSlots = [];
+  for (const kid of kids) {
+    let w;
+    if (marriedOut.has(kid)) {
+      // She lives beside her husband; here she stands among her siblings as
+      // a single card pointing at her other placement.
+      w = COL_W;
+      kidSlots.push({ id: kid, linked: marriedOut.get(kid), x: x0 + kidsW, w });
+    } else {
+      w = layout(kid, gen + 1, x0 + kidsW);
+      if (w === 0) { continue; }
+      kidSlots.push({ id: kid, x: x0 + kidsW, w, laid: true });
+    }
+    kidsW += w;
+  }
+
+  const width = Math.max(pairW, kidsW || 0);
+  const pairX = x0 + width / 2 - pairW / 2;
+  pair.forEach((id, i) => {
+    PLACEMENTS.push({
+      id, gen,
+      x: pairX + i * COL_W + COL_W / 2,
+      role: i === 0 ? "anchor" : "consort",
+      pairWith: i === 0 ? null : anchor,
+    });
+  });
+
+  // Children that laid themselves out already sit right; the linked leaves
+  // and childless children need their card here.
+  let cursor = x0 + (width - kidsW) / 2;
+  for (const slot of kidSlots) {
+    const cx = cursor + slot.w / 2;
+    if (slot.linked != null) {
+      PLACEMENTS.push({ id: slot.id, gen: gen + 1, x: cx, role: "birth",
+                        linkedTo: slot.linked });
+    } else if (!placedCard(slot.id, gen + 1)) {
+      PLACEMENTS.push({ id: slot.id, gen: gen + 1, x: cx, role: "anchor" });
+    }
+    slot.cx = cx;
+    cursor += slot.w;
+  }
+
+  BUSES.push({
+    fromX: pairX + pairW / 2,
+    gen,
+    children: kidSlots.map(s => ({ id: s.id, x: s.cx })),
+  });
+
+  return width;
+}
+
+function placedCard(id, gen) {
+  return PLACEMENTS.some(pl => pl.id === id && pl.gen === gen);
+}
+
+const BUSES = [];
+let cursorX = 0;
+const roots = DATA.people
+  .filter(p => !hasParents(p.id))
+  .filter(p => {
+    // A parentless consort is drawn beside their spouse, not as a root.
+    for (const list of consorts.values()) {
+      if (list.includes(p.id)) return false;
+    }
+    return true;
+  })
+  .filter(p => (kidsOfPair(p.id).length || (consorts.get(p.id) || []).length))
+  .sort((x, y) => x.id - y.id);
+
+for (const root of roots) {
+  cursorX += layout(root.id, 0, cursorX) + COL_W * 0.6;
+}
+// Anyone the walk never reached still deserves a card.
+const reached = new Set(PLACEMENTS.map(pl => pl.id));
+let strayX = cursorX;
+for (const person of DATA.people) {
+  if (!reached.has(person.id)) {
+    PLACEMENTS.push({ id: person.id, gen: 0, x: strayX + COL_W / 2, role: "anchor" });
+    strayX += COL_W;
+  }
+}
+for (const pl of PLACEMENTS) { pl.y = pl.gen * ROW_H; }
 
 const canvas = document.getElementById("chart");
 const ctx = canvas.getContext("2d");
@@ -542,94 +540,60 @@ function draw() {
 
   const descent = css("--line-descent");
   const marriage = css("--line-marriage");
-
-  /* Descent is drawn the way a genealogy chart draws it: one drop from the
-     couple, a horizontal bus over their children, and a short riser to each.
-     Eight separate curves from one pair of parents is technically the same
-     information and far harder to read. */
-
-  ctx.lineWidth = 1.2;
-  ctx.strokeStyle = descent;
-  ctx.lineJoin = "round";
-
-  const families = new Map();
-  for (const person of DATA.people) {
-    if (!visible(person)) continue;
-    const pair = [person.father, person.mother]
-      .filter(id => id != null && PEOPLE.get(id) && visible(PEOPLE.get(id)));
-    if (!pair.length) continue;
-    const key = pair.join("+");
-    if (!families.has(key)) families.set(key, { parents: pair, children: [] });
-    families.get(key).children.push(person.id);
-  }
-
-  for (const { parents, children } of families.values()) {
-    const above = parents.map(id => POS.get(id));
-    const fromX = above.reduce((sum, p) => sum + p.x, 0) / above.length;
-    const fromY = Math.max(...above.map(p => p.y)) + NODE_H / 2;
-    const below = children.map(id => POS.get(id));
-    const toY = Math.min(...below.map(p => p.y)) - NODE_H / 2;
-    const busY = toY - 22;
-
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(fromX, busY);
-    ctx.stroke();
-
-    const left = Math.min(fromX, ...below.map(p => p.x));
-    const right = Math.max(fromX, ...below.map(p => p.x));
-    ctx.beginPath();
-    ctx.moveTo(left, busY);
-    ctx.lineTo(right, busY);
-    ctx.stroke();
-
-    for (const child of below) {
-      ctx.beginPath();
-      ctx.moveTo(child.x, busY);
-      ctx.lineTo(child.x, child.y - NODE_H / 2);
-      ctx.stroke();
-    }
-  }
-
-  /* Marriage is drawn the way genealogy charts draw it: a bold double bar
-     between the two cards. A faint dash was easy to miss, and "who is married
-     to whom" is half of what a reader wants from the chart. Partners who sit
-     apart (cousin marriages pulled to opposite ends) keep a dashed line —
-     long and quiet, but unmistakably a link. */
-  for (const [a, b] of DATA.unions) {
-    const pa = PEOPLE.get(a), pb = PEOPLE.get(b);
-    if (!pa || !pb || !visible(pa) || !visible(pb)) continue;
-    const A = POS.get(a), B = POS.get(b);
-    ctx.strokeStyle = marriage;
-    const adjacent = A.y === B.y && Math.abs(A.x - B.x) < COL_W * 1.6;
-    if (adjacent) {
-      const left = Math.min(A.x, B.x) + NODE_W / 2;
-      const right = Math.max(A.x, B.x) - NODE_W / 2;
-      ctx.lineWidth = 1.6;
-      for (const dy of [-2.5, 2.5]) {
-        ctx.beginPath();
-        ctx.moveTo(left, A.y + dy);
-        ctx.lineTo(right, A.y + dy);
-        ctx.stroke();
-      }
-    } else {
-      ctx.lineWidth = 1.6;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.moveTo(A.x, A.y);
-      ctx.lineTo(B.x, B.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-  }
-  ctx.lineWidth = 1.2;
-
   const ink = css("--ink"), surface = css("--surface"), rule = css("--rule");
   const accent = css("--accent"), muted = css("--muted");
 
-  for (const person of DATA.people) {
-    if (!visible(person)) continue;
-    const { x, y } = POS.get(person.id);
+  const shown = PLACEMENTS.filter(pl => visible(PEOPLE.get(pl.id)));
+  const at = new Map();
+  for (const pl of shown) at.set(pl.id + ":" + pl.gen, pl);
+
+  // Descent: one drop from each couple, a bus, a riser to each child.
+  ctx.strokeStyle = descent;
+  ctx.lineWidth = 1.2;
+  for (const bus of BUSES) {
+    const children = bus.children.filter(c => at.has(c.id + ":" + (bus.gen + 1)));
+    if (!children.length) continue;
+    const fromY = bus.gen * ROW_H + NODE_H / 2;
+    const toY = (bus.gen + 1) * ROW_H - NODE_H / 2;
+    const busY = toY - 22;
+    ctx.beginPath();
+    ctx.moveTo(bus.fromX, fromY);
+    ctx.lineTo(bus.fromX, busY);
+    ctx.stroke();
+    const xs = children.map(c => c.x).concat([bus.fromX]);
+    ctx.beginPath();
+    ctx.moveTo(Math.min(...xs), busY);
+    ctx.lineTo(Math.max(...xs), busY);
+    ctx.stroke();
+    for (const child of children) {
+      ctx.beginPath();
+      ctx.moveTo(child.x, busY);
+      ctx.lineTo(child.x, toY);
+      ctx.stroke();
+    }
+  }
+
+  // Marriage: the double bar between the two adjacent cards. The only line
+  // on the chart that is not descent.
+  ctx.strokeStyle = marriage;
+  ctx.lineWidth = 1.6;
+  for (const pl of shown) {
+    if (pl.role !== "consort") continue;
+    const partner = at.get(pl.pairWith + ":" + pl.gen);
+    if (!partner) continue;
+    const left = Math.min(pl.x, partner.x) + NODE_W / 2;
+    const right = Math.max(pl.x, partner.x) - NODE_W / 2;
+    for (const dy of [-2.5, 2.5]) {
+      ctx.beginPath();
+      ctx.moveTo(left, pl.y + dy);
+      ctx.lineTo(right, pl.y + dy);
+      ctx.stroke();
+    }
+  }
+
+  for (const pl of shown) {
+    const person = PEOPLE.get(pl.id);
+    const x = pl.x, y = pl.y;
     const hit = matches(person);
     const isSelected = selected === person.id;
 
@@ -644,19 +608,23 @@ function draw() {
                   : person.sex === "F" ? css("--female") : css("--unknown");
     ctx.fillRect(x - NODE_W / 2, y - NODE_H / 2, 3, NODE_H);
 
-    // The number is the only thing that is unique. Two men called Toufic
-    // Sukar in one conversation is not a hypothetical here.
     ctx.fillStyle = muted;
     ctx.font = "400 9px " + css("--mono");
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillText(person.id, x + NODE_W / 2 - 4, y - NODE_H / 2 + 3);
 
+    // Her card among her siblings points at where she stands as a wife.
+    let second = person.aka ? person.aka : person.family;
+    if (pl.role === "birth" && pl.linkedTo != null) {
+      const husband = PEOPLE.get(pl.linkedTo);
+      if (husband) second = "\u26AD " + husband.given;
+    }
+
     ctx.fillStyle = query && !hit ? muted : ink;
     ctx.font = "500 12px " + css("--body");
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    const second = person.aka ? person.aka : person.family;
     ctx.fillText(clip(person.given, 13), x + 2, y - (second ? 7 : 0));
     if (second) {
       ctx.fillStyle = muted;
@@ -687,14 +655,14 @@ function clip(text, max) {
 
 function fit() {
   const box = canvas.getBoundingClientRect();
-  const shown = DATA.people.filter(visible).map(p => POS.get(p.id));
+  const shown = PLACEMENTS.filter(pl => visible(PEOPLE.get(pl.id)));
   if (!shown.length) return;
   const xs = shown.map(p => p.x), ys = shown.map(p => p.y);
   const w = Math.max(...xs) - Math.min(...xs) + NODE_W * 2;
   const h = Math.max(...ys) - Math.min(...ys) + NODE_H * 3;
   // On a phone, fitting forty people across four inches gives a wall of
   // specks. Better to open at a size names can be read at and let them pan.
-  const READABLE = 0.55;
+  const READABLE = 0.42;
   view.k = Math.max(Math.min(box.width / w, box.height / h, 1.25), READABLE);
   view.x = box.width / 2 - ((Math.min(...xs) + Math.max(...xs)) / 2) * view.k;
   view.y = box.height / 2 - ((Math.min(...ys) + Math.max(...ys)) / 2) * view.k;
@@ -739,11 +707,10 @@ function pick(e) {
   const box = canvas.getBoundingClientRect();
   const x = (e.clientX - box.left - view.x) / view.k;
   const y = (e.clientY - box.top - view.y) / view.k;
-  for (const person of DATA.people) {
-    if (!visible(person)) continue;
-    const p = POS.get(person.id);
-    if (Math.abs(x - p.x) <= NODE_W / 2 && Math.abs(y - p.y) <= NODE_H / 2) {
-      show(person.id);
+  for (const pl of PLACEMENTS) {
+    if (!visible(PEOPLE.get(pl.id))) continue;
+    if (Math.abs(x - pl.x) <= NODE_W / 2 && Math.abs(y - pl.y) <= NODE_H / 2) {
+      show(pl.id);
       return;
     }
   }
