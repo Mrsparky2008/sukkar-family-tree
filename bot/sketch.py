@@ -29,7 +29,8 @@ class _Family:
 
 
 def build(payloads: list[dict], self_name: str | None = None,
-          self_father: str | None = None) -> str:
+          self_father: str | None = None,
+          ids: dict[str, int] | None = None) -> str:
     """Render the payloads (basket and queued alike) as a text sketch."""
     spouses: dict[str, str] = {}
     parent_family: dict[str, _Family] = {}   # child name -> family
@@ -168,37 +169,45 @@ def build(payloads: list[dict], self_name: str | None = None,
     drawn: set[int] = set()
     lines: list[str] = []
 
+    def deco(name: str) -> str:
+        """Append the permanent number for people already in the tree."""
+        if not ids:
+            return name
+        number = ids.get(name)
+        if number is None:
+            first = name.split()[0]
+            number = ids.get(first)
+        return f"{name} #{number}" if number is not None else name
+
     def couple_line(name: str) -> str:
         partner = spouses.get(name)
-        return f"{name} ⚭ {partner}" if partner else name
+        return f"{deco(name)} ⚭ {deco(partner)}" if partner else deco(name)
 
     def draw(family: _Family, indent: str) -> None:
         if id(family) in drawn:
             return
         drawn.add(id(family))
-        parents = " ⚭ ".join(family.parents)
+        parents = " ⚭ ".join(deco(name) for name in family.parents)
         for name in family.parents:
             partner = spouses.get(name)
             if partner and partner not in family.parents:
-                parents += f" ⚭ {partner}"
+                parents += f" ⚭ {deco(partner)}"
         lines.append(indent + parents)
+        draw_children(family, indent)
+
+    def draw_children(family: _Family, indent: str) -> None:
         for position, child in enumerate(family.children):
             last = position == len(family.children) - 1
             lines.append(indent + ("└ " if last else "├ ") + couple_line(child))
             below = next(
                 (f for f in families
-                 if child in f.parents or spouses.get(child) in f.parents),
+                 if id(f) not in drawn
+                 and (child in f.parents or spouses.get(child) in f.parents)),
                 None,
             )
-            if below is not None and id(below) not in drawn:
+            if below is not None:
                 drawn.add(id(below))
-                stem = indent + ("  " if last else "│ ")
-                for sub_position, grandchild in enumerate(below.children):
-                    sub_last = sub_position == len(below.children) - 1
-                    lines.append(
-                        stem + ("└ " if sub_last else "├ ")
-                        + couple_line(grandchild)
-                    )
+                draw_children(below, indent + ("  " if last else "│ "))
 
     roots = [
         family for family in families

@@ -104,10 +104,27 @@ async def _say(
 async def _sketch_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     """The contributor's work so far, as a monospace drawing. May be empty."""
     who = await store.contributor_state(update.effective_user.id)
+    ids: dict[str, int] = {}
+    taken: set[str] = set()
+    for candidate in await store.subject_candidates(update.effective_user.id):
+        if not candidate.get("person_id"):
+            continue
+        label = (candidate["label"] or "").split(" (")[0]
+        ids[label] = candidate["person_id"]
+        first = label.split()[0] if label else ""
+        # A bare given name maps only while it is unambiguous — two Toufics
+        # is the whole reason the numbers exist.
+        if first in taken:
+            ids.pop(first, None)
+        elif first and first not in ids:
+            ids[first] = candidate["person_id"]
+            taken.add(first)
     drawing = sketch.build(
-        list(_basket(context)),
+        await store.approved_payloads(update.effective_user.id)
+        + list(_basket(context)),
         self_name=(who["label"] or "you").split(" (")[0],
         self_father=who.get("father_given_name"),
+        ids=ids,
     )
     if not drawing:
         return ""
@@ -813,9 +830,14 @@ async def _known_names(
             if entry.get("given_name"):
                 names.add(entry["given_name"])
     for candidate in await store.subject_candidates(update.effective_user.id):
-        first = (candidate["label"] or "").split()
+        label = candidate["label"] or ""
+        first = label.split()
         if first:
             names.add(first[0])
+        if "(" in label:
+            names.add(label.split("(", 1)[1].rstrip(")").strip())
+        if candidate.get("person_id"):
+            names.add(str(candidate["person_id"]))
     who = await store.contributor_state(update.effective_user.id)
     if who.get("father_given_name"):
         names.add(who["father_given_name"])
@@ -864,11 +886,14 @@ async def _resolve_named_subject(
     basket — both count, because making somebody wait for an admin before they
     can name their grandmother's parents is how a session ends.
     """
-    target = name.casefold()
+    target = name.casefold().lstrip("#")
 
     for payload in _basket(context):
         for entry in payload.get("people") or []:
-            if entry.get("given_name", "").casefold() == target:
+            if target in (
+                entry.get("given_name", "").casefold(),
+                (entry.get("also_known_as") or "").casefold(),
+            ):
                 return {
                     "person_id": None,
                     "submission_id": None,
@@ -877,8 +902,22 @@ async def _resolve_named_subject(
                 }
 
     for candidate in await store.subject_candidates(update.effective_user.id):
-        first = (candidate["label"] or "").split()
-        if first and first[0].casefold() == target:
+        label = candidate["label"] or ""
+        aka = (
+            label.split("(", 1)[1].rstrip(")").strip().casefold()
+            if "(" in label
+            else ""
+        )
+        first = label.split()
+        matches = (
+            (first and first[0].casefold() == target)
+            or (aka and aka == target)
+            or (
+                target.isdigit()
+                and candidate.get("person_id") == int(target)
+            )
+        )
+        if matches:
             return {
                 "person_id": candidate["person_id"],
                 "submission_id": candidate["submission_id"],
@@ -902,15 +941,13 @@ async def _absorb_dictation(
 
     lead_extra = ""
     if reading.subject:
+        # Best effort: the subject may be in the tree, in the basket — or
+        # introduced by this very message, in which case the per-line anchors
+        # place her relatives and there is nothing to bail out over.
         found = await _resolve_named_subject(update, context, reading.subject)
-        if found is None:
-            return await _show_menu(
-                update,
-                context,
-                texts.DICTATED_SUBJECT_UNKNOWN.format(name=reading.subject),
-            )
-        _set_cursor(context, found)
-        lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
+        if found is not None:
+            _set_cursor(context, found)
+            lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
 
     # Lines can name people other than whoever the bot was asking about:
     # "Hanna married Therese, kids are ...". Those hang off Hanna — who may
@@ -921,7 +958,7 @@ async def _absorb_dictation(
         anchors[name] = await _resolve_named_subject(update, context, name)
     unplaced: list[str] = []
     placed = sorted(
-        name for name, found in anchors.items() if found is not None
+        found["label"] for found in anchors.values() if found is not None
     )
     if placed:
         lead_extra += "\n\n" + texts.DICTATED_ABOUT_OTHERS.format(

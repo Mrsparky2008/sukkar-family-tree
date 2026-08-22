@@ -208,7 +208,7 @@ async def queue(telegram_user_id: int, payload: dict[str, Any]) -> dict[str, Any
 
 
 def _subject_candidates(
-    conn: sqlite3.Connection, telegram_user_id: int, limit: int = 20
+    conn: sqlite3.Connection, telegram_user_id: int, limit: int = 60
 ) -> list[dict[str, Any]]:
     """Everyone this contributor could reasonably be asked about.
 
@@ -229,7 +229,7 @@ def _subject_candidates(
             {
                 "person_id": row["id"],
                 "submission_id": None,
-                "label": db.row_display_name(row),
+                "label": db.display_name_with_also_known_as(row),
                 "note": note,
             }
         )
@@ -239,7 +239,8 @@ def _subject_candidates(
 
     if own_id is not None:
         add_person(db.get_person(conn, own_id), note="you")
-        for row in db.get_parents(conn, own_id):
+        parents = db.get_parents(conn, own_id)
+        for row in parents:
             add_person(row)
         for row in db.get_siblings(conn, own_id):
             add_person(row)
@@ -247,6 +248,15 @@ def _subject_candidates(
             add_person(row)
         for row in db.get_children(conn, own_id):
             add_person(row)
+        # The wider circle the sketch shows must also be addressable:
+        # "add kids to #19" points at an uncle, not a sibling.
+        for parent in parents:
+            for row in db.get_parents(conn, parent["id"]):
+                add_person(row)
+            for sibling in db.get_siblings(conn, parent["id"]):
+                add_person(sibling)
+                for partner in db.get_partners(conn, sibling["id"]):
+                    add_person(partner)
 
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=50):
         payload = db.submission_payload(row)
@@ -292,6 +302,96 @@ def _corroboration(
         subject_submission_id=subject_submission_id,
         branch_id=contributor["branch_id"] if contributor else None,
     )
+
+
+def _sketchable(row) -> dict:
+    """A person from the tree, shaped like a payload entry for the sketch.
+
+    The display name is split so the sketch shows the full computed name — the
+    father middle name doing its disambiguation work — rather than a brother
+    and a grandfather who share a given name collapsing into one string.
+    """
+    parts = db.row_display_name(row).split(" ", 1)
+    return {
+        "given_name": parts[0],
+        "family_name": parts[1] if len(parts) > 1 else None,
+        "also_known_as": row["also_known_as"],
+        "role": None,
+    }
+
+
+def _approved_payloads(conn, telegram_user_id: int) -> list[dict]:
+    """The contributor's approved corner of the tree, as sketch food.
+
+    Basket entries disappear once an admin approves them; without this the
+    sketch would go blank at exactly the moment the data became real.
+    """
+    contributor = db.get_contributor(conn, telegram_user_id)
+    if contributor is None or contributor["linked_person_id"] is None:
+        return []
+    me = db.get_person(conn, contributor["linked_person_id"])
+    if me is None:
+        return []
+
+    payloads: list[dict] = []
+
+    def about_label(row) -> str:
+        return db.row_display_name(row)
+
+    def family_of(row) -> None:
+        """Parents of `row`, and `row`'s siblings, spouse and children."""
+        label = about_label(row)
+        parents = db.get_parents(conn, row["id"])
+        if parents:
+            people = []
+            for parent in parents:
+                entry = _sketchable(parent)
+                entry["role"] = (
+                    submissions.FATHER if parent["sex"] == "M" else submissions.MOTHER
+                )
+                people.append(entry)
+            payloads.append(
+                {"kind": submissions.ADD_PARENTS,
+                 "about": {"label": label}, "people": people}
+            )
+        for sibling in db.get_siblings(conn, row["id"]):
+            entry = _sketchable(sibling)
+            entry["role"] = submissions.SIBLING
+            payloads.append(
+                {"kind": submissions.ADD_SIBLING,
+                 "about": {"label": label}, "people": [entry]}
+            )
+            for partner in db.get_partners(conn, sibling["id"]):
+                spouse = _sketchable(partner)
+                spouse["role"] = submissions.SPOUSE
+                payloads.append(
+                    {"kind": submissions.ADD_SPOUSE,
+                     "about": {"label": about_label(sibling)},
+                     "people": [spouse]}
+                )
+        for partner in db.get_partners(conn, row["id"]):
+            entry = _sketchable(partner)
+            entry["role"] = submissions.SPOUSE
+            payloads.append(
+                {"kind": submissions.ADD_SPOUSE,
+                 "about": {"label": label}, "people": [entry]}
+            )
+        for child in db.get_children(conn, row["id"]):
+            entry = _sketchable(child)
+            entry["role"] = submissions.CHILD
+            payloads.append(
+                {"kind": submissions.ADD_CHILD,
+                 "about": {"label": label}, "people": [entry]}
+            )
+
+    family_of(me)
+    for parent in db.get_parents(conn, me["id"]):
+        family_of(parent)
+    return payloads
+
+
+async def approved_payloads(telegram_user_id: int) -> list[dict]:
+    return await _run(_approved_payloads, telegram_user_id)
 
 
 def _recent_submissions(

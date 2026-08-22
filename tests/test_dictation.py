@@ -398,3 +398,16 @@ class InstructionWordTests(unittest.TestCase):
     def test_a_sketch_request_mixed_in_still_parses_the_person(self):
         reading = dictation.parse("Show me the sketch and add Nawal as my sibling")
         self.assertEqual([m.given_name for m in reading.people], ["Nawal"])
+
+
+class OneSpouseEachTests(unittest.TestCase):
+    def test_a_name_after_the_spouse_rejoins_the_list(self):
+        reading = dictation.parse(
+            "Her siblings are Khalil, Hanna married to Therese Taouk and Youssef",
+            subject_name="Wadiha",
+        )
+        roles = {m.given_name: m.role for m in reading.people}
+        self.assertEqual(roles["Youssef"], S.SIBLING)
+        self.assertEqual(roles["Therese"], S.SPOUSE)
+        spouses = [m for m in reading.people if m.role == S.SPOUSE]
+        self.assertEqual(len(spouses), 1)

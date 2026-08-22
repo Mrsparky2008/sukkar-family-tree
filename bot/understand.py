@@ -18,7 +18,7 @@ from typing import Any, Iterable
 
 #: Trailing punctuation people add without thinking: "Steven." — which would
 #: otherwise become part of the name and show up on the tree forever.
-EDGE_PUNCTUATION = " \t\r\n.,;:!?\"'`´’‘“”()[]{}<>«»…"
+EDGE_PUNCTUATION = " \t\r\n.,;:!?\"'`´’‘“”()[]{}<>«»…#"
 
 #: What `tidy` strips from a whole message. Brackets are NOT in here: a
 #: message ending "...Youssef (Joe)" would lose its closing bracket, and the

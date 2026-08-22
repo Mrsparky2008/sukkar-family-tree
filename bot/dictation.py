@@ -427,10 +427,10 @@ def _known_owner(prefix: str, known: set[str]) -> str | None:
     if len(words) != 1:
         return None
 
-    bare = re.sub(r"[^a-z]", "", words[0].casefold())
+    bare = re.sub(r"[^a-z0-9]", "", words[0].casefold())
     for candidate in (bare, bare.rstrip("s")):
         if candidate and candidate in known:
-            return _titled(candidate)
+            return candidate if candidate.isdigit() else _titled(candidate)
     return None
 
 
@@ -532,7 +532,10 @@ def parse(
                 declared_subject = declared_subject or who
                 declared_sex = {"daughter": "F", "son": "M"}.get(what) or declared_sex
                 subject_name = who
-                about = None if who == declared_subject else who
+                # The subject is named explicitly, so relatives carry the name
+                # rather than "whoever the cursor was on" — the message may
+                # introduce her itself, one line up.
+                about = who
             if what in ("wife", "husband"):
                 current_role, current_sex, pair_expected, plural = (
                     submissions.SPOUSE,
@@ -612,6 +615,16 @@ def parse(
                 about = owner
                 prefix = ""
             remainder = (prefix + " " + line[end:]).strip(" :,-—")
+            # "kids of #18 are..." / "children of John:" — the owner can sit
+            # AFTER the role word too.
+            trailing = re.match(
+                r"^(?:of|for|to)\s+(#?\w+)[,:]?\s*", remainder, re.IGNORECASE
+            )
+            if trailing:
+                owner = _known_owner(trailing.group(1), known)
+                if owner is not None:
+                    about = owner
+                    remainder = remainder[trailing.end():]
         else:
             remainder = line
 
@@ -683,9 +696,15 @@ def parse(
                     spouse_part, spouse_note = _strip_notes(spouse_part)
                     if spouse_note:
                         loose_notes.append(spouse_note)
-                    for person in _names_in(spouse_part, subject_name,
-                                            family_names):
-                        add_spouse_of(added_here[-1], person)
+                    named = _names_in(spouse_part, subject_name, family_names)
+                    if named:
+                        # "married to Therese and Youssef" — one spouse each;
+                        # whoever follows the "and" is back on the list, not a
+                        # second wife.
+                        add_spouse_of(added_here[-1], named[0])
+                        for person in named[1:]:
+                            added_here.append(add_person(person, count))
+                            count += 1
             continue
 
         remainder, note = _strip_notes(remainder)
