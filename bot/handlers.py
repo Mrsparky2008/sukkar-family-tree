@@ -658,8 +658,18 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
     elif role == submissions.SPOUSE:
         targets["child"] = cursor  # the couple's children hang off the subject
         targets["parents"] = ref(first)
+        # They are the COUPLE's children — "Add Louisa's children" right
+        # after adding your own wife reads as somebody else's family.
+        who = await store.contributor_state(update.effective_user.id)
+        if _is_self(payload.get("about") or {}, who):
+            children_label = texts.NEXT_CHILDREN_MINE
+        else:
+            children_label = texts.NEXT_CHILDREN_COUPLE.format(
+                a=(payload.get("about") or {}).get("label", "").split()[0],
+                b=name,
+            )
         rows = [
-            [_button(texts.NEXT_CHILDREN_OF.format(name=name), f"{CB_NEXT}:child:child")],
+            [_button(children_label, f"{CB_NEXT}:child:child")],
             [_button(texts.NEXT_PARENTS_OF.format(name=name), f"{CB_NEXT}:parents:parents")],
         ]
     else:  # a father and mother

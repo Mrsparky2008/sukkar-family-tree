@@ -412,6 +412,8 @@ NEXT_ANOTHER_SIBLING = "Add another brother or sister"
 NEXT_ANOTHER_CHILD = "Add another child"
 NEXT_SPOUSE_OF = "Add {name}'s husband or wife"
 NEXT_CHILDREN_OF = "Add {name}'s children"
+NEXT_CHILDREN_MINE = "Add your children"
+NEXT_CHILDREN_COUPLE = "Add {a} and {b}'s children"
 NEXT_PARENTS_OF = "Add {name}'s parents"
 NEXT_SIBLINGS_OF = "Add {name}'s brothers and sisters"
 
