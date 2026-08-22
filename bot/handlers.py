@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
     ASK_SOURCE,
     REVIEW,
     EDIT_VALUE,
-    ASK_SEX,
+    CLARIFY,
 ) = range(12)
 
 # --- callback data ---------------------------------------------------------
@@ -70,6 +70,7 @@ CB_EDIT = "edit"
 CB_SEND_ALL = "sendall"
 CB_REMOVE = "remove"
 CB_SEX = "sexq"
+CB_LINK = "linkq"
 
 
 # ===========================================================================
@@ -1290,6 +1291,7 @@ async def _absorb_dictation(
             if kind and not entry.get("sex"):
                 queue.append(
                     {
+                        "type": "sex",
                         "draft_id": payload["_draft_id"],
                         "position": position,
                         "name": entry["given_name"],
@@ -1297,20 +1299,66 @@ async def _absorb_dictation(
                         "owner": owner,
                     }
                 )
+
+    # And when a name looks like somebody already recorded — by an admin, or
+    # by a cousin whose claim is still in the queue — the person who would
+    # know is the one typing. Ask now, keep the answer as evidence; the merge
+    # itself stays an admin's decision.
+    asked = context.user_data.setdefault("asked_links", [])
+    link_questions = 0
+    for payload in stashed:
+        if link_questions >= 3:
+            break  # a party guest is not here for an interrogation
+        for position, entry in enumerate(payload.get("people") or []):
+            match = await store.find_link(user_id, entry, payload.get("about") or {})
+            if match is None:
+                continue
+            key = f"{entry['given_name']}:{match['kind']}:{match['id']}"
+            if key in asked:
+                continue
+            asked.append(key)
+            label = match["label"]
+            if match["kind"] == "person":
+                label = f"{label} (#{match['id']})"
+            else:
+                label = f"{label}{texts.MATCH_PENDING_SUFFIX}"
+            queue.append(
+                {
+                    "type": "link",
+                    "draft_id": payload["_draft_id"],
+                    "position": position,
+                    "name": entry["given_name"],
+                    "match_label": label,
+                    "person_id": match["person_id"],
+                    "submission_id": (
+                        match["id"] if match["kind"] == "submission" else None
+                    ),
+                }
+            )
+            link_questions += 1
+            break  # one question per payload is plenty
+
     if queue:
-        context.user_data["sex_queue"] = queue
-        context.user_data["sex_lead"] = lead
-        return await _ask_next_sex(update, context)
+        context.user_data["clarify_queue"] = queue
+        context.user_data["clarify_lead"] = lead
+        return await _ask_next_clarify(update, context)
 
     return await _show_review(update, context, lead)
 
 
 # ===========================================================================
-# Brother or sister?
+# Clarifying as it goes
 # ===========================================================================
 #
-# Only for people dictated without a sex. The flows already ask; free text
-# is the one door somebody can walk through without ever saying.
+# Two kinds of question the bot asks in the middle of a conversation, both
+# because the person typing is the one who knows:
+#
+#   * brother or sister — for people dictated without a sex. The flows
+#     already ask; free text is the one door somebody can walk through
+#     without ever saying.
+#   * same person? — when a name looks like somebody already recorded. The
+#     answer is kept as evidence on the submission; merging stays an
+#     admin's decision.
 # ===========================================================================
 
 _SEX_BUTTONS = {
@@ -1320,14 +1368,28 @@ _SEX_BUTTONS = {
 }
 
 
-async def _ask_next_sex(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    queue = context.user_data.get("sex_queue") or []
+async def _ask_next_clarify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    queue = context.user_data.get("clarify_queue") or []
     if not queue:
-        context.user_data.pop("sex_queue", None)
-        lead = context.user_data.pop("sex_lead", None)
+        context.user_data.pop("clarify_queue", None)
+        lead = context.user_data.pop("clarify_lead", None)
         return await _show_review(update, context, lead)
 
     item = queue[0]
+    if item["type"] == "link":
+        await _say(
+            update,
+            texts.ask_same_person(item["name"], item["match_label"]),
+            _kb(
+                [
+                    [_button(texts.SAME_PERSON, f"{CB_LINK}:yes")],
+                    [_button(texts.DIFFERENT_PERSON, f"{CB_LINK}:no")],
+                    [_button(texts.NOT_SURE, f"{CB_LINK}:skip")],
+                ]
+            ),
+        )
+        return CLARIFY
+
     male_label, female_label = _SEX_BUTTONS[item["kind"]]
     await _say(
         update,
@@ -1340,42 +1402,90 @@ async def _ask_next_sex(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ]
         ),
     )
-    return ASK_SEX
+    return CLARIFY
+
+
+def _clarify_entry(
+    context: ContextTypes.DEFAULT_TYPE, item: dict[str, Any]
+) -> dict[str, Any] | None:
+    for payload in _basket(context):
+        if payload.get("_draft_id") == item["draft_id"]:
+            people = payload.get("people") or []
+            if item["position"] < len(people):
+                return people[item["position"]]
+    return None
 
 
 def _record_sex(context: ContextTypes.DEFAULT_TYPE, sex: str | None) -> None:
-    queue = context.user_data.get("sex_queue") or []
+    queue = context.user_data.get("clarify_queue") or []
     if not queue:
         return
     item = queue.pop(0)
     if sex is None:
         return
-    for payload in _basket(context):
-        if payload.get("_draft_id") == item["draft_id"]:
-            people = payload.get("people") or []
-            if item["position"] < len(people):
-                people[item["position"]]["sex"] = sex
-            return
+    entry = _clarify_entry(context, item)
+    if entry is not None:
+        entry["sex"] = sex
+
+
+def _record_link(context: ContextTypes.DEFAULT_TYPE, answer: str) -> None:
+    queue = context.user_data.get("clarify_queue") or []
+    if not queue:
+        return
+    item = queue.pop(0)
+    if answer == "skip":
+        return
+    entry = _clarify_entry(context, item)
+    if entry is None:
+        return
+    if answer == "yes":
+        if item.get("person_id"):
+            entry["same_person_id"] = item["person_id"]
+        elif item.get("submission_id"):
+            entry["same_submission_id"] = item["submission_id"]
+    elif answer == "no" and item.get("person_id"):
+        # A denial is evidence too — it stops the admin merging on a hunch.
+        entry["not_person_id"] = item["person_id"]
 
 
 async def on_sex_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     answer = update.callback_query.data.split(":", 1)[1]
     _record_sex(context, answer if answer in ("M", "F") else None)
-    return await _ask_next_sex(update, context)
+    return await _ask_next_clarify(update, context)
 
 
-async def on_sex_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_link_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    _record_link(context, update.callback_query.data.split(":", 1)[1])
+    return await _ask_next_clarify(update, context)
+
+
+async def on_clarify_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typed = update.effective_message.text or ""
+    queue = context.user_data.get("clarify_queue") or []
+    current = queue[0] if queue else {"type": "sex"}
+
+    if current["type"] == "link":
+        answer = understand.yes_no(typed)
+        if answer is not None:
+            _record_link(context, "yes" if answer else "no")
+            return await _ask_next_clarify(update, context)
+        if understand.is_skip(typed):
+            _record_link(context, "skip")
+            return await _ask_next_clarify(update, context)
+        await _say(update, texts.SEX_NOT_UNDERSTOOD)
+        return CLARIFY
+
     sex = understand.sex_word(typed)
     if sex is not None:
         _record_sex(context, sex)
-        return await _ask_next_sex(update, context)
+        return await _ask_next_clarify(update, context)
     if understand.is_skip(typed):
         _record_sex(context, None)
-        return await _ask_next_sex(update, context)
+        return await _ask_next_clarify(update, context)
     await _say(update, texts.SEX_NOT_UNDERSTOOD)
-    return ASK_SEX
+    return CLARIFY
 
 
 # ===========================================================================

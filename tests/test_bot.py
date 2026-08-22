@@ -1065,6 +1065,82 @@ class BrotherOrSisterTests(BotTestCase):
         self.assertIn("Is Rohnda your son or daughter?", chat.text)
 
 
+class LinkQuestionTests(BotTestCase):
+    """When a name looks like somebody already recorded, ask the person
+    typing — they know. The answer is evidence; merging stays an admin's."""
+
+    async def test_a_match_on_the_tree_is_asked_about(self):
+        chat = await self.identified_as_khalil()
+        await chat.say("My brother Georges")
+        self.assertIn("same person as Georges Youssef Sukkar", chat.text)
+        self.assertIn(texts.SAME_PERSON, chat.buttons)
+
+    async def test_yes_travels_with_the_submission(self):
+        chat = await self.identified_as_khalil()
+        await chat.say("My brother Georges")
+        await chat.tap(texts.SAME_PERSON)
+        await chat.tap("Send all")
+
+        queued = self.queued()[-1]
+        entry = queued["payload"]["people"][0]
+        self.assertEqual(entry["same_person_id"], self.ids["georges"])
+        self.assertEqual(queued["matched_person_id"], self.ids["georges"])
+
+    async def test_no_blocks_the_matchers_guess(self):
+        """A denial must stop the admin merging on a hunch."""
+        chat = await self.identified_as_khalil()
+        await chat.say("My brother Georges")
+        await chat.tap(texts.DIFFERENT_PERSON)
+        await chat.tap("Send all")
+
+        queued = self.queued()[-1]
+        entry = queued["payload"]["people"][0]
+        self.assertEqual(entry["not_person_id"], self.ids["georges"])
+        self.assertIsNone(queued["matched_person_id"])
+
+    async def test_not_sure_records_nothing(self):
+        chat = await self.identified_as_khalil()
+        await chat.say("My brother Georges")
+        await chat.tap(texts.NOT_SURE)
+        await chat.tap("Send all")
+
+        entry = self.queued()[-1]["payload"]["people"][0]
+        self.assertNotIn("same_person_id", entry)
+        self.assertNotIn("not_person_id", entry)
+
+    async def test_two_contributors_naming_the_same_person_collide_early(self):
+        """The common case: two brothers each entering the same third brother."""
+        first = await self.identified_as_khalil()
+        await first.say("My brother Tanios")
+        await first.tap("Send all")
+
+        second = Conversation(user_id=5002)
+        await second.start()
+        await second.say("Georges")
+        await second.tap(config.FAMILY_NAME)
+        await second.say("Youssef")
+        await second.tap("Georges Youssef")
+        await second.tap(texts.MENU_SWITCH)
+        await second.tap("Khalil Youssef")
+        await second.say("His brother is Tanios")
+
+        self.assertIn("Is this the same person as Tanios", second.text)
+        self.assertIn("waiting for review", second.text)
+        await second.tap(texts.SAME_PERSON)
+        await second.tap("Send all")
+
+        entry = self.queued()[-1]["payload"]["people"][0]
+        self.assertIn("same_submission_id", entry)
+
+    async def test_a_bare_shared_name_is_not_interrogated(self):
+        """Half the family answers to the same given names. No relational
+        evidence, no question."""
+        chat = await self.fresh_contributor()
+        await chat.say("My brother Georges")
+        self.assertNotIn("same person", chat.text)
+        self.assertIn("Check the spelling", chat.text)
+
+
 class WiringTests(unittest.TestCase):
     def test_application_builds_with_every_handler_registered(self):
         from bot.main import build_application

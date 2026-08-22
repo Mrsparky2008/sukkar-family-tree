@@ -76,6 +76,12 @@ PERSON_FIELDS = frozenset(
         # the duplicate matcher and the reviewing admin. It is NOT a link — the
         # real father_id is decided at approval time, by a human.
         "father_given_name",
+        # The contributor's own answer when the bot spotted a likely match and
+        # asked "is this the same person?". Evidence for the admin, never a
+        # decision: the merge still happens at approval time, by a human.
+        "same_person_id",
+        "same_submission_id",
+        "not_person_id",
     }
 )
 
@@ -244,6 +250,12 @@ def validate(payload: dict[str, Any]) -> list[str]:
         if entry.get("sex") not in (None, "M", "F"):
             problems.append(f"{where}: sex must be 'M', 'F', or absent")
 
+        for link_field in ("same_person_id", "same_submission_id", "not_person_id"):
+            if entry.get(link_field) is not None and not isinstance(
+                entry[link_field], int
+            ):
+                problems.append(f"{where}: {link_field} must be a number")
+
         for field in entry:
             if field.lower() in FORBIDDEN_FIELDS:
                 problems.append(
@@ -354,6 +366,19 @@ def detail_lines(payload: dict[str, Any]) -> list[str]:
             extras.append(entry["given_name_ar"])
         if entry.get("notes"):
             extras.append(entry["notes"])
+        if entry.get("same_person_id"):
+            extras.append(
+                f"contributor confirmed: same as person #{entry['same_person_id']}"
+            )
+        if entry.get("same_submission_id"):
+            extras.append(
+                "contributor confirmed: same as pending submission "
+                f"#{entry['same_submission_id']}"
+            )
+        if entry.get("not_person_id"):
+            extras.append(
+                f"contributor says NOT the same as person #{entry['not_person_id']}"
+            )
         if extras:
             label = role_word(entry["role"], entry.get("sex")).title()
             lines.append(f"  {label}: {entry['given_name']} — {' — '.join(extras)}")

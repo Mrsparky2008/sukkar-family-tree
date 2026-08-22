@@ -198,6 +198,13 @@ def _queue(
                     matched_person_id = match["person_id"]
                     break
 
+        # The contributor was asked in the chat and answered. Their yes beats
+        # a similarity score; their no unsets a guess that they rejected.
+        if entry.get("same_person_id"):
+            matched_person_id = entry["same_person_id"]
+        elif entry.get("not_person_id") and matched_person_id == entry["not_person_id"]:
+            matched_person_id = None
+
     submission_id = db.add_submission(
         conn, telegram_user_id, payload, matched_person_id=matched_person_id
     )
@@ -207,6 +214,50 @@ def _queue(
 async def queue(telegram_user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     """Put a submission in the review queue. Nothing else reaches the family data."""
     return await _run(_queue, telegram_user_id, payload)
+
+
+def _find_link(
+    conn: sqlite3.Connection,
+    telegram_user_id: int,
+    entry: dict[str, Any],
+    about: dict[str, Any],
+) -> dict[str, Any] | None:
+    """The one existing record this new mention most looks like, if any.
+
+    This powers the bot asking "is this the same person as ...?" in the
+    middle of the conversation — the person who typed the name is standing
+    right there, and they know. Their answer becomes evidence; the merge
+    itself stays an admin's decision."""
+    contributor = db.get_contributor(conn, telegram_user_id)
+    matches = db.corroborate(
+        conn,
+        entry["given_name"],
+        role=entry.get("role"),
+        family_name=entry.get("family_name"),
+        subject_person_id=about.get("person_id"),
+        subject_submission_id=about.get("submission_id"),
+        father_given_name=entry.get("father_given_name"),
+        branch_id=contributor["branch_id"] if contributor else None,
+        threshold=config.FUZZY_MATCH_THRESHOLD,
+    )
+    for match in matches:
+        # Their own earlier claims corroborating themselves is not news worth
+        # a question; another person's claim, or an approved person, is.
+        if match["kind"] == "submission" and match.get("submitted_by") == telegram_user_id:
+            continue
+        # A bare name in common is not a link — half the family answers to
+        # the same given names. Only ask when something relational agrees:
+        # the same father, the same subject, a shared relative.
+        if not match.get("reasons"):
+            continue
+        return match
+    return None
+
+
+async def find_link(
+    telegram_user_id: int, entry: dict[str, Any], about: dict[str, Any]
+) -> dict[str, Any] | None:
+    return await _run(_find_link, telegram_user_id, entry, about)
 
 
 def _subject_candidates(

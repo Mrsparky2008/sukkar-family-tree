@@ -173,6 +173,24 @@ def ask_person_sex(name: str, owner: str | None, kind: str) -> str:
 SEX_NOT_UNDERSTOOD = "Just tap one of the buttons, or Skip if you're not sure."
 
 
+def ask_same_person(name: str, match: str) -> str:
+    """The bot noticed a likely match and the person who would know is right
+    here. Ask now, while they are looking at it — their answer rides along
+    with the submission as evidence for whoever reviews it."""
+    return (
+        f"Quick check — I might already know about {name}.\n\n"
+        f"Is this the same person as {match}?"
+    )
+
+
+SAME_PERSON = "Same person"
+DIFFERENT_PERSON = "No, different person"
+NOT_SURE = "Not sure"
+
+#: How a match reads inside the question.
+MATCH_PENDING_SUFFIX = " (added recently, waiting for review)"
+
+
 def ask_sibling_sex(subject: str | None) -> str:
     if not subject:
         return ASK_SIBLING_SEX
