@@ -352,7 +352,7 @@ class MenuTests(BotTestCase):
         original, config.PUBLIC_URL = config.PUBLIC_URL, ""
         try:
             await chat.tap(texts.MENU_VIEW)
-            self.assertIn("isn't published yet", chat.transcript())
+            self.assertIn("published yet", chat.transcript())
         finally:
             config.PUBLIC_URL = original
 

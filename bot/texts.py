@@ -174,7 +174,7 @@ MENU_ADD_SIBLING = "Add a sibling"
 MENU_ADD_SPOUSE = "Add a spouse"
 MENU_ADD_CHILD = "Add a child"
 MENU_FIX = "Fix something I submitted"
-MENU_VIEW = "View the tree"
+MENU_VIEW = "See my corner of the tree"
 
 
 # --- following the cursor --------------------------------------------------
@@ -383,11 +383,11 @@ DICTATED_SUBJECT_UNKNOWN = (
     "Add {name} first — then tell me this again and it'll slot straight in."
 )
 
-SKETCH_HEADING = "What you've built so far:"
+SKETCH_HEADING = "Your corner of the tree so far:"
 
 SKETCH_EMPTY = (
-    "Nothing on the sketch yet — everything you'd added has already been "
-    "sent for review. Add somebody and it starts again."
+    "Nothing to draw for you yet — add a few relatives and this becomes "
+    "your corner of the tree."
 )
 
 MENU_TYPE_HINT = (
@@ -496,7 +496,7 @@ FIX_STATUS = {
 
 # --- view the tree ---------------------------------------------------------
 
-VIEW_TREE = "Here it is:\n{url}"
+VIEW_TREE = "The whole family, all the corners joined up:\n{url}"
 
 VIEW_TREE_UNPUBLISHED = (
     "The tree isn't published yet — it goes up once there are enough names on "

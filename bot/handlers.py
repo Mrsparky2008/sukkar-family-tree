@@ -830,12 +830,9 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     choice = query.data.split(":", 1)[1]
 
     if choice == "view":
-        text = (
-            texts.VIEW_TREE.format(url=config.PUBLIC_URL)
-            if config.PUBLIC_URL
-            else texts.VIEW_TREE_UNPUBLISHED
-        )
-        return await _show_menu(update, context, text)
+        # Their corner, not a bare link: what they are building is the thing
+        # worth looking at, and it works from day one, published or not.
+        return await _show_sketch(update, context)
 
     if choice == "review":
         return await _show_review(update, context)
@@ -2100,12 +2097,23 @@ def _asks_for_sketch(typed: str) -> bool:
 
 
 async def _show_sketch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    footer = (
+        texts.VIEW_TREE.format(url=config.PUBLIC_URL)
+        if config.PUBLIC_URL
+        else texts.VIEW_TREE_UNPUBLISHED
+    )
     drawing = await _sketch_of(update, context)
     if not drawing:
-        return await _show_menu(update, context, texts.SKETCH_EMPTY)
+        return await _show_menu(
+            update, context, f"{texts.SKETCH_EMPTY}\n\n{footer}"
+        )
     await _say(
         update,
-        html_escape_module.escape(texts.SKETCH_HEADING) + "\n" + drawing,
+        html_escape_module.escape(texts.SKETCH_HEADING)
+        + "\n"
+        + drawing
+        + "\n"
+        + html_escape_module.escape(footer),
         _menu_keyboard(_subject_name_or_none(context), len(_basket(context))),
         html=True,
     )
