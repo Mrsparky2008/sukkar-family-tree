@@ -45,7 +45,8 @@ log = logging.getLogger(__name__)
     REVIEW,
     EDIT_VALUE,
     CLARIFY,
-) = range(12)
+    TOUR,
+) = range(13)
 
 # --- callback data ---------------------------------------------------------
 
@@ -71,6 +72,7 @@ CB_SEND_ALL = "sendall"
 CB_REMOVE = "remove"
 CB_SEX = "sexq"
 CB_LINK = "linkq"
+CB_TOUR = "tour"
 
 
 # ===========================================================================
@@ -593,7 +595,10 @@ async def _queue_identity(
     user_id = update.effective_user.id
     await store.queue(user_id, payload)
     await store.remember_label(user_id, submissions.person_label(payload["people"][0]))
-    return await _show_menu(update, context, texts.IDENTITY_QUEUED)
+    # A brand-new contributor: walk them through their family rather than
+    # dropping them at a menu.
+    context.user_data["tour_on"] = True
+    return await _offer_tour(update, context, texts.IDENTITY_QUEUED)
 
 
 async def on_identity_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -611,6 +616,206 @@ async def on_identity_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await _show_menu(
         update, context, texts.IDENTITY_CONFIRMED.format(name=linked["label"])
     )
+
+
+# ===========================================================================
+# The guided tour
+# ===========================================================================
+#
+# A brand-new contributor is not dropped in front of a menu. The bot leads,
+# in the order that builds a family fastest: your parents, your brothers and
+# sisters, your own household, then a generation up on each side —
+# grandparents, uncles and aunties and who each of them married. Every step
+# skippable, the menu one tap away, nothing asked twice — and any step made
+# redundant by what they already entered is silently passed over.
+# ===========================================================================
+
+#: (step id, "flow" to launch Add-parents / "tell" to invite free text,
+#:  whose corner of the family it is about)
+_TOUR_STEPS = [
+    ("own_parents", "flow", "self"),
+    ("own_siblings", "tell", "self"),
+    ("own_family", "tell", "self"),
+    ("father_parents", "flow", "father"),
+    ("father_siblings", "tell", "father"),
+    ("mother_parents", "flow", "mother"),
+    ("mother_siblings", "tell", "mother"),
+]
+
+#: What a bare name typed at a "tell" step most likely is.
+_TOUR_DEFAULT_ROLE = {
+    "own_siblings": submissions.SIBLING,
+    "own_family": submissions.SPOUSE,
+    "father_siblings": submissions.SIBLING,
+    "mother_siblings": submissions.SIBLING,
+}
+
+
+async def _tour_next(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> dict[str, Any] | None:
+    who = await store.contributor_state(update.effective_user.id)
+    done = context.user_data.setdefault("tour_done", [])
+
+    parents = await store.own_parent_names(update.effective_user.id)
+    for payload in _basket(context):
+        if payload.get("kind") == submissions.ADD_PARENTS and _is_self(
+            payload.get("about") or {}, who
+        ):
+            for entry in payload.get("people") or []:
+                key = "father" if entry["role"] == submissions.FATHER else "mother"
+                parents.setdefault(key, entry["given_name"])
+
+    for step, kind, side in _TOUR_STEPS:
+        if step in done:
+            continue
+        if side == "self":
+            if step == "own_parents" and len(
+                await _recorded_parents(context, who, None)
+            ) >= 2:
+                done.append(step)
+                continue
+            return {"step": step, "kind": kind, "cursor": None}
+
+        name = parents.get(side)
+        if not name:
+            continue  # not known yet; may become known, so not marked done
+        found = await _resolve_named_subject(update, context, name)
+        if found is None:
+            continue
+        if kind == "flow" and len(
+            await _recorded_parents(context, who, found)
+        ) >= 2:
+            done.append(step)
+            continue
+        return {
+            "step": step,
+            "kind": kind,
+            "cursor": found,
+            "name": name,
+            "sex": "M" if side == "father" else "F",
+        }
+    return None
+
+
+def _tour_prompt(step: dict[str, Any]) -> str:
+    return {
+        "own_parents": lambda: texts.TOUR_OWN_PARENTS,
+        "own_siblings": lambda: texts.TOUR_OWN_SIBLINGS,
+        "own_family": lambda: texts.TOUR_OWN_FAMILY,
+        "father_parents": lambda: texts.tour_grandparents(step["name"]),
+        "mother_parents": lambda: texts.tour_grandparents(step["name"]),
+        "father_siblings": lambda: texts.tour_parent_siblings(
+            step["name"], step["sex"]
+        ),
+        "mother_siblings": lambda: texts.tour_parent_siblings(
+            step["name"], step["sex"]
+        ),
+    }[step["step"]]()
+
+
+async def _offer_tour(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, lead: str | None = None
+):
+    """Show the next tour step — or the menu, for anyone past the tour."""
+    if not context.user_data.get("tour_on"):
+        return await _show_menu(update, context, lead)
+
+    step = await _tour_next(update, context)
+    if step is None:
+        context.user_data["tour_on"] = False
+        _set_cursor(context, None)
+        count = await store.count_contributions(update.effective_user.id) + sum(
+            len(p.get("people") or []) for p in _basket(context)
+        )
+        closing = texts.TOUR_DONE.format(count=count)
+        return await _show_menu(
+            update, context, f"{lead}\n\n{closing}" if lead else closing
+        )
+
+    context.user_data["tour_step"] = step["step"]
+    context.user_data["tour_kind"] = step["kind"]
+    _set_cursor(context, step.get("cursor"))
+
+    if step["kind"] == "flow":
+        first = [_button(texts.TOUR_LETS_GO, f"{CB_TOUR}:go")]
+    else:
+        none_label = (
+            texts.TOUR_NONE_FAMILY
+            if step["step"] == "own_family"
+            else texts.TOUR_NONE_SIBLINGS
+        )
+        first = [_button(none_label, f"{CB_TOUR}:none")]
+    rows = [
+        first,
+        [_button(texts.TOUR_SKIP, f"{CB_TOUR}:skip")],
+        [_button(texts.TOUR_MENU, f"{CB_TOUR}:menu")],
+    ]
+    prompt = _tour_prompt(step)
+    await _say(update, f"{lead}\n\n{prompt}" if lead else prompt, _kb(rows))
+    return TOUR
+
+
+def _tour_mark_done(context: ContextTypes.DEFAULT_TYPE) -> None:
+    step = context.user_data.pop("tour_step", None)
+    if step is not None:
+        done = context.user_data.setdefault("tour_done", [])
+        if step not in done:
+            done.append(step)
+
+
+async def on_tour_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    choice = update.callback_query.data.split(":", 1)[1]
+
+    if choice == "menu":
+        # They want to drive. Fine — the tree grows in any direction.
+        context.user_data["tour_on"] = False
+        return await _show_menu(update, context)
+
+    if choice in ("none", "skip"):
+        _tour_mark_done(context)
+        return await _offer_tour(update, context)
+
+    # "Let's do it" — the step's flow, pointed at the right person.
+    _tour_mark_done(context)
+    _begin(context, flows.ADD_PARENTS)
+    await _prefill_own_father(update, context, flows.ADD_PARENTS)
+    return await _ask(update, context)
+
+
+async def on_tour_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    typed = update.effective_message.text or ""
+    step_id = context.user_data.get("tour_step") or ""
+    kind = context.user_data.get("tour_kind")
+
+    answer = understand.yes_no(typed)
+    if answer is False or understand.is_skip(typed):
+        _tour_mark_done(context)
+        return await _offer_tour(update, context)
+    if answer is True:
+        if kind == "flow":
+            _tour_mark_done(context)
+            _begin(context, flows.ADD_PARENTS)
+            await _prefill_own_father(update, context, flows.ADD_PARENTS)
+            return await _ask(update, context)
+        await _say(update, texts.TOUR_GO_ON)
+        return TOUR
+
+    # Not a yes or a no — hopefully names. Read them like any dictation,
+    # hung off whoever this step is about.
+    reading = dictation.parse(
+        typed,
+        default_role=_TOUR_DEFAULT_ROLE.get(step_id),
+        subject_name=_subject_name_or_none(context),
+        known_names=await _known_names(update, context),
+    )
+    if reading:
+        _tour_mark_done(context)
+        return await _absorb_dictation(update, context, reading)
+
+    await _say(update, texts.NOT_UNDERSTOOD)
+    return await _offer_tour(update, context)
 
 
 # ===========================================================================
@@ -642,7 +847,11 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     flow = flows.BY_KIND[choice]
     _begin(context, flow)
+    await _prefill_own_father(update, context, flow)
+    return await _ask(update, context)
 
+
+async def _prefill_own_father(update, context, flow) -> None:
     if flow.kind == submissions.ADD_PARENTS and _cursor(context) is None:
         # They told us their father's name when they signed up. Asking again
         # two minutes later reads as if the bot was not listening.
@@ -652,8 +861,6 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             state = _state(context)
             state["answers"]["father_given"] = known
             state["index"] = 1
-
-    return await _ask(update, context)
 
 
 # ===========================================================================
@@ -874,7 +1081,7 @@ async def on_climb_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if answer is True:
         return await _climb_yes(update, context)
     if answer is False:
-        return await _show_menu(update, context)
+        return await _offer_tour(update, context)
 
     target = context.user_data.get("climb_to") or {}
     name = target.get("label", "them").split()[0]
@@ -896,7 +1103,7 @@ async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == CB_CLIMB_NO:
-        return await _show_menu(update, context)
+        return await _offer_tour(update, context)
 
     # The person we just named is still in the basket, so point the cursor at
     # the draft. Send resolves it to a real submission id.
@@ -1668,7 +1875,7 @@ async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["basket"] = []
     context.user_data.pop("draft_counter", None)
     _set_cursor(context, None)
-    return await _show_menu(update, context, texts.SAVED)
+    return await _offer_tour(update, context, texts.SAVED)
 
 
 # ===========================================================================

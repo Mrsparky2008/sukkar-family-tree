@@ -373,6 +373,63 @@ async def person_given_if_male(person_id: int) -> str | None:
     return await _run(_person_given_if_male, person_id)
 
 
+def _own_parent_names(
+    conn: sqlite3.Connection, telegram_user_id: int
+) -> dict[str, str]:
+    """The contributor's parents' given names, from wherever they were said.
+
+    The tree if they are linked; otherwise their own queued claims — the
+    guided tour runs before any admin has approved anything, so waiting for
+    the tree would mean never knowing."""
+    state = _contributor_state(conn, telegram_user_id)
+    names: dict[str, str] = {}
+    if state["father_given_name"]:
+        names["father"] = state["father_given_name"]
+
+    if state["person_id"] is not None:
+        for row in db.get_parents(conn, state["person_id"]):
+            key = "father" if row["sex"] == "M" else "mother"
+            names.setdefault(key, row["given_name"])
+
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=50):
+        payload = db.submission_payload(row)
+        if payload.get("kind") != submissions.ADD_PARENTS:
+            continue
+        about = payload.get("about") or {}
+        is_self = (
+            about.get("person_id") == state["person_id"]
+            if state["person_id"] is not None
+            else about.get("submission_id") == state["identify_submission_id"]
+        )
+        if not is_self:
+            continue
+        for entry in payload.get("people") or []:
+            if entry.get("role") == submissions.FATHER:
+                names.setdefault("father", entry["given_name"])
+            elif entry.get("role") == submissions.MOTHER:
+                names.setdefault("mother", entry["given_name"])
+    return names
+
+
+async def own_parent_names(telegram_user_id: int) -> dict[str, str]:
+    return await _run(_own_parent_names, telegram_user_id)
+
+
+def _count_contributions(conn: sqlite3.Connection, telegram_user_id: int) -> int:
+    total = 0
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):
+        payload = db.submission_payload(row)
+        if payload.get("kind") == submissions.CORRECTION:
+            continue
+        total += len(payload.get("people") or [])
+    return total
+
+
+async def count_contributions(telegram_user_id: int) -> int:
+    """How many people this contributor has named so far, queued or approved."""
+    return await _run(_count_contributions, telegram_user_id)
+
+
 def _corroboration(
     conn: sqlite3.Connection,
     given_name: str,

@@ -90,6 +90,8 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        # New signups get the guided tour; these tests drive the menu.
+        await chat.tap(texts.TOUR_MENU)
         return chat
 
     async def send_basket(self, chat: Conversation):
@@ -430,6 +432,7 @@ class AddParentsTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")             # own father: always known, now required
+        await chat.tap(texts.TOUR_MENU)
         await chat.tap(texts.MENU_ADD_PARENTS)
         # father pre-filled from signup; only the mother is asked
         await chat.say("Nada")
@@ -454,6 +457,7 @@ class AddParentsTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        await chat.tap(texts.TOUR_MENU)
         before = len(self.queued())
         # Point the cursor at their own pending record: no pre-filled father
         # there, so both parents can be skipped — and skipping both is nothing.
@@ -1063,6 +1067,79 @@ class BrotherOrSisterTests(BotTestCase):
         chat = await self.identified_as_khalil()
         await chat.say("My kids are Rohnda and Jason")
         self.assertIn("Is Rohnda your son or daughter?", chat.text)
+
+
+class GuidedTourTests(BotTestCase):
+    """A new contributor is led through their family, not dropped at a menu."""
+
+    async def raw_signup(self, user_id: int = 7001) -> Conversation:
+        chat = Conversation(user_id=user_id)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Fares")
+        return chat
+
+    async def test_a_new_signup_is_led_not_dropped_at_a_menu(self):
+        chat = await self.raw_signup()
+        self.assertIn("starting with your parents", chat.text)
+        self.assertIn(texts.TOUR_LETS_GO, chat.buttons)
+        self.assertIn(texts.TOUR_MENU, chat.buttons)
+
+    async def test_nobody_is_told_about_branches(self):
+        chat = await self.raw_signup()
+        self.assertNotIn("branch", chat.transcript())
+
+    async def test_the_tour_walks_the_whole_family(self):
+        chat = await self.raw_signup(user_id=7002)
+
+        await chat.tap(texts.TOUR_LETS_GO)      # my parents
+        await chat.say("Wadiha")                # mother; father known from signup
+        await chat.tap(texts.SKIP)              # her maiden name
+        await chat.tap(texts.ADD_MORE)          # decline the climb
+
+        self.assertIn("brothers and sisters", chat.text)
+        await chat.say("My brother Tony and my sister Mary")
+        await chat.tap("Send all")
+
+        self.assertIn("married", chat.text)     # own household next
+        await chat.tap(texts.TOUR_NONE_FAMILY)
+
+        self.assertIn("Fares's parents", chat.text)   # grandparents, father's side
+        await chat.tap(texts.TOUR_LETS_GO)
+        await chat.say("Elias")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.ADD_MORE)
+
+        self.assertIn("Did Fares have brothers and sisters", chat.text)
+        self.assertIn("married", chat.text)     # uncles' wives, aunties' husbands
+        await chat.say("His brother Semaan married Rima")
+        await chat.tap("Send all")
+
+        self.assertIn("Wadiha's parents", chat.text)  # mother's side next
+        await chat.tap(texts.TOUR_SKIP)
+        self.assertIn("Did Wadiha have brothers and sisters", chat.text)
+        await chat.tap(texts.TOUR_SKIP)
+
+        self.assertIn("people so far", chat.text)     # the tour signs off
+        self.assertIn(texts.MENU_ADD_CHILD, chat.buttons)
+
+    async def test_a_skipped_step_is_not_asked_again(self):
+        chat = await self.raw_signup(user_id=7003)
+        await chat.tap(texts.TOUR_SKIP)         # parents skipped
+        self.assertIn("brothers and sisters", chat.text)
+        await chat.tap(texts.TOUR_NONE_SIBLINGS)
+        self.assertIn("married", chat.text)
+        await chat.say("My wife is Laila")
+        await chat.tap("Send all")
+        # Parents and siblings never come back; with no parents named there
+        # is no grandparent side to offer, so the tour signs off.
+        self.assertNotIn("starting with your parents", chat.text)
+        self.assertIn("people so far", chat.text)
+
+    async def test_a_linked_contributor_skips_the_tour(self):
+        chat = await self.identified_as_khalil()
+        self.assertIn(texts.MENU_ADD_CHILD, chat.buttons)
 
 
 class LinkQuestionTests(BotTestCase):

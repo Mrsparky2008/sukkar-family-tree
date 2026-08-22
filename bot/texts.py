@@ -23,7 +23,7 @@ VILLAGE = config.VILLAGE
 WELCOME = (
     f"Welcome.\n\n"
     f"This is the {FAMILY} family tree of {VILLAGE}. Relatives add the names "
-    f"they know, someone from your branch checks them, and the tree grows.\n\n"
+    f"they know, the family checks them, and the tree grows.\n\n"
     f"Two questions and you're in."
 )
 
@@ -51,11 +51,63 @@ IDENTITY_NONE_OF_THESE = "None of these are me"
 IDENTITY_CONFIRMED = "Good to meet you, {name}."
 
 IDENTITY_QUEUED = (
-    "Thank you. Someone from your branch will confirm you — usually within a "
-    "day or two.\n\nYou don't have to wait. You can start adding relatives now."
+    "Thanks — you're in. One of the family will double-check the details, "
+    "but there's nothing to wait for."
 )
 
 IDENTITY_ALREADY_LINKED = "You're already in as {name}."
+
+
+# --- the guided tour -------------------------------------------------------
+#
+# A new contributor shouldn't be dropped in front of a menu. The bot leads:
+# parents, brothers and sisters, their own family, then a generation up on
+# each side — grandparents, uncles and aunties and who each of them married.
+# Every step can be skipped, the menu is always one tap away, and nothing is
+# ever asked twice.
+
+TOUR_LETS_GO = "Let's do it"
+TOUR_SKIP = "Skip for now"
+TOUR_MENU = "I'll choose myself"
+TOUR_NONE_SIBLINGS = "No brothers or sisters"
+TOUR_NONE_FAMILY = "Not married"
+TOUR_GO_ON = "Great — type their names."
+
+TOUR_OWN_PARENTS = "Let's build your corner of the tree, starting with your parents."
+
+TOUR_OWN_SIBLINGS = (
+    "Do you have brothers and sisters? Type them all in one go, like:\n\n"
+    "My brothers Tony and Joe, and my sister Mary. Tony married Rima."
+)
+
+TOUR_OWN_FAMILY = (
+    "What about your own family — are you married? Kids?\n\n"
+    "My wife is Laila, our kids are Sami, Rita and Joe."
+)
+
+
+def tour_grandparents(parent: str) -> str:
+    return (
+        f"Now a generation up: {parent}'s parents — your grandparents. "
+        f"Do you know their names?"
+    )
+
+
+def tour_parent_siblings(parent: str, sex: str | None) -> str:
+    his = "His" if sex == "M" else "Her" if sex == "F" else "Their"
+    return (
+        f"Did {parent} have brothers and sisters? They're your uncles and "
+        f"aunties — and who each of them married matters just as much:\n\n"
+        f"{his} brother Tony married Rima, {his.lower()} sister Mary "
+        f"married Joseph Karam."
+    )
+
+
+TOUR_DONE = (
+    "That's a brilliant start — {count} people so far. Keep going in any "
+    "direction you like: cousins, their kids, in-laws, the lot. Every name "
+    "you remember is one the tree keeps forever."
+)
 
 
 # --- the menu --------------------------------------------------------------
@@ -233,8 +285,7 @@ NAME_TOO_LONG = "That's longer than a first name. Try again?"
 NAME_EMPTY = "I didn't catch a name there. Try again?"
 
 SAVED = (
-    "Saved. It's with your branch's reviewer now — it won't show on the tree "
-    "until they've had a look."
+    "Saved. One of the family will look it over before it shows on the tree."
 )
 
 #: After a save, offer the obvious next step rather than dropping back to a
@@ -392,8 +443,8 @@ FIX_ASK_NOTE = (
 )
 
 FIX_SAVED = (
-    "Passed on to your branch's reviewer. Corrections go through the same "
-    "check as anything else, so nothing changes on the tree until they say so."
+    "Passed on. Corrections get the same once-over as anything else, so "
+    "nothing changes on the tree until someone's had a look."
 )
 
 FIX_STATUS = {
@@ -431,7 +482,7 @@ SHARE = (
 
 HELP = (
     "Add relatives you know, one at a time. Everything you send is checked by "
-    "someone from your branch before it appears on the tree.\n\n"
+    "one of the family before it appears on the tree.\n\n"
     "/start — the menu\n"
     "/share — the link to send to relatives\n"
     "/cancel — stop what we're doing\n\n"
