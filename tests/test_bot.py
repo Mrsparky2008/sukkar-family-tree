@@ -1221,17 +1221,17 @@ class GuidedTourTests(BotTestCase):
 
         self.assertIn("brothers and sisters", chat.text)
         await chat.tap(texts.TOUR_LETS_GO)
-        await chat.tap(texts.SIBLING_BROTHER)
+        self.assertIn("How many brothers", chat.text)
+        await chat.tap("1")
+        self.assertIn("How many sisters", chat.text)
+        await chat.tap("1")
+        await chat.tap(texts.YES_WORD)          # all the same father
+        self.assertIn("first brother", chat.text)
         await chat.say("Tony")
-        await chat.tap(texts.YES_WORD)          # same father
-        self.assertIn("his father is Fares", chat.text)
-        await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap(texts.NEXT_ANOTHER_SIBLING)
-        await chat.tap(texts.SIBLING_SISTER)
+        self.assertIn("first sister", chat.text)
         await chat.say("Mary")
-        await chat.tap(texts.YES_WORD)
+        self.assertIn("their father is Fares", chat.text)
         await chat.tap(texts.CONFIRM_CORRECT)
-        await chat.tap(texts.ADD_MORE)
 
         self.assertIn("married", chat.text)     # own household next
         await chat.tap(texts.TOUR_NOT_MARRIED)
@@ -1273,6 +1273,72 @@ class GuidedTourTests(BotTestCase):
     async def test_a_linked_contributor_skips_the_tour(self):
         chat = await self.identified_as_khalil()
         self.assertIn(texts.MENU_ADD_CHILD, chat.buttons)
+
+
+class CountedCaptureTests(BotTestCase):
+    """How many brothers, how many sisters — then exactly that many names."""
+
+    async def start_siblings(self, user_id: int) -> Conversation:
+        chat = Conversation(user_id=user_id)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
+        await chat.tap(texts.TOUR_SKIP)          # parents later
+        await chat.tap(texts.TOUR_LETS_GO)       # siblings
+        return chat
+
+    async def test_counts_drive_the_questions(self):
+        chat = await self.start_siblings(7300)
+        await chat.tap("2")
+        await chat.tap("1")
+        await chat.tap(texts.YES_WORD)
+        await chat.say("Toufic")
+        self.assertIn("second brother", chat.text)
+        await chat.say("Joseph")
+        self.assertIn("first sister", chat.text)
+        await chat.say("Nawal")
+        self.assertIn("Toufic and Joseph are your brothers", chat.text)
+        self.assertIn("Nawal is your sister", chat.text)
+        self.assertIn("their father is Fares", chat.text)
+        await chat.tap(texts.CONFIRM_CORRECT)
+
+        await chat.tap(texts.TOUR_MENU)
+        await chat.tap("Review and send")
+        await chat.tap("Send all")
+        entries = [
+            q["payload"]["people"][0]
+            for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_SIBLING
+        ]
+        self.assertEqual(
+            [(e["given_name"], e["sex"]) for e in entries],
+            [("Toufic", "M"), ("Joseph", "M"), ("Nawal", "F")],
+        )
+        self.assertTrue(all(e["father_given_name"] == "Fares" for e in entries))
+
+    async def test_zero_and_zero_moves_on(self):
+        chat = await self.start_siblings(7301)
+        await chat.tap("0")
+        await chat.tap("0")
+        self.assertIn("married", chat.text)      # straight to the next step
+
+    async def test_change_it_starts_the_batch_over(self):
+        chat = await self.start_siblings(7302)
+        await chat.tap("1")
+        await chat.tap("0")
+        await chat.tap(texts.YES_WORD)
+        await chat.say("Tonyy")
+        await chat.tap(texts.CONFIRM_CHANGE)
+        self.assertIn("How many brothers", chat.text)
+
+    async def test_typed_numbers_work(self):
+        chat = await self.start_siblings(7303)
+        await chat.say("two")
+        self.assertIn("a number", chat.text.lower())
+        await chat.say("2")
+        self.assertIn("How many sisters", chat.text)
 
 
 class LinkQuestionTests(BotTestCase):

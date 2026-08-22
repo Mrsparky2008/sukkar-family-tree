@@ -371,6 +371,43 @@ CONFIRM_CHANGE = "Change it"
 # After each person, the obvious next moves — concrete, named, one tap.
 
 NEXT_PROMPT = "What next?"
+
+# --- counted capture --------------------------------------------------------
+#
+# "How many brothers? How many sisters?" — then exactly that many name
+# questions, sexes already known, no add-another taps, one read-back at the
+# end. The counts are the shortcut AND the map of what to ask next.
+
+COUNT_MORE = "More"
+COUNT_ASK_NUMBER = "Type the number."
+COUNT_NOT_A_NUMBER = "Just a number — how many?"
+
+_ORDINALS = [
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh",
+    "eighth", "ninth", "tenth", "eleventh", "twelfth",
+]
+
+
+def ordinal(n: int) -> str:
+    return _ORDINALS[n - 1] if 1 <= n <= len(_ORDINALS) else f"{n}th"
+
+
+def how_many(subject: str | None, kin_plural: str) -> str:
+    whose = "do you" if not subject else f"did {subject}"
+    return f"How many {kin_plural} {whose} have?"
+
+
+def counted_name(subject: str | None, position: int, kin: str) -> str:
+    return f"{possessive(subject).capitalize()} {ordinal(position)} {kin}'s first name?"
+
+
+def ask_same_father_all(subject: str | None, count: int) -> str:
+    whose = "you" if not subject else subject
+    lead = "Same father as" if count == 1 else "All the same father as"
+    return f"{lead} {whose}?"
+
+
+COUNTED_NONE_NOTED = "Righto — noted."
 NEXT_ANOTHER_SIBLING = "Add another brother or sister"
 NEXT_ANOTHER_CHILD = "Add another child"
 NEXT_SPOUSE_OF = "Add {name}'s husband or wife"

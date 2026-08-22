@@ -103,6 +103,11 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 cancel_button,
                 MessageHandler(TEXT_ANSWER, handlers.on_next_text),
             ],
+            handlers.COUNTED: [
+                CallbackQueryHandler(handlers.on_counted_button, pattern=r"^cnt:"),
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_counted_text),
+            ],
             handlers.CONFIRM_PERSON: [
                 CallbackQueryHandler(
                     handlers.on_person_confirmed, pattern=r"^(keep|redo)$"

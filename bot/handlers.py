@@ -16,6 +16,7 @@ The only thing this module ever writes to the family data is a row in
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -47,7 +48,8 @@ log = logging.getLogger(__name__)
     CLARIFY,
     TOUR,
     CONFIRM_PERSON,
-) = range(14)
+    COUNTED,
+) = range(15)
 
 # --- callback data ---------------------------------------------------------
 
@@ -78,6 +80,7 @@ CB_TOUR = "tour"
 CB_KEEP = "keep"
 CB_REDO = "redo"
 CB_NEXT = "next"
+CB_COUNT = "cnt"
 
 
 # ===========================================================================
@@ -944,11 +947,16 @@ async def on_tour_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _tour_mark_done(context)
         return await _offer_tour(update, context)
 
-    # "Yes" — the step's own flow, pointed at the right person.
-    flow = flows.BY_KIND.get(
-        context.user_data.get("tour_flow") or "", flows.ADD_PARENTS
-    )
+    # "Yes" — the step's own capture, pointed at the right person. Siblings
+    # and children go through the counted shortcut: how many, then exactly
+    # that many names.
+    kind = context.user_data.get("tour_flow") or ""
     _tour_mark_done(context)
+    if kind == submissions.ADD_SIBLING:
+        return await _start_counted(update, context, submissions.SIBLING)
+    if kind == submissions.ADD_CHILD:
+        return await _start_counted(update, context, submissions.CHILD)
+    flow = flows.BY_KIND.get(kind, flows.ADD_PARENTS)
     _begin(context, flow)
     await _prefill_own_father(update, context, flow)
     return await _ask(update, context)
@@ -964,8 +972,12 @@ async def on_tour_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _tour_mark_done(context)
         return await _offer_tour(update, context)
     if answer is True:
-        flow = flows.BY_KIND.get(kind or "", flows.ADD_PARENTS)
         _tour_mark_done(context)
+        if kind == submissions.ADD_SIBLING:
+            return await _start_counted(update, context, submissions.SIBLING)
+        if kind == submissions.ADD_CHILD:
+            return await _start_counted(update, context, submissions.CHILD)
+        flow = flows.BY_KIND.get(kind or "", flows.ADD_PARENTS)
         _begin(context, flow)
         await _prefill_own_father(update, context, flow)
         return await _ask(update, context)
@@ -984,6 +996,246 @@ async def on_tour_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await _say(update, texts.NOT_UNDERSTOOD)
     return await _offer_tour(update, context)
+
+
+# ===========================================================================
+# Counted capture
+# ===========================================================================
+#
+# "How many brothers? How many sisters?" — then exactly that many name
+# questions. The counts are the shortcut and the map: sexes already known,
+# no add-another taps, one same-father question for the batch, one
+# read-back at the end.
+# ===========================================================================
+
+_COUNT_KIN = {
+    submissions.SIBLING: {"M": ("brother", "brothers"), "F": ("sister", "sisters")},
+    submissions.CHILD: {"M": ("son", "sons"), "F": ("daughter", "daughters")},
+}
+
+
+def _counted(context: ContextTypes.DEFAULT_TYPE) -> dict[str, Any]:
+    return context.user_data.setdefault("counted", {})
+
+
+async def _start_counted(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, role: str
+):
+    cursor = _cursor(context)
+    context.user_data["counted"] = {
+        "role": role,
+        "about": await _subject_of(update, context),
+        "subject": cursor["label"].split()[0] if cursor else None,
+        "counts": {},
+        "names": [],
+        "same_father": None,
+    }
+    return await _ask_count(update, context, "M")
+
+
+def _count_rows() -> list[list[InlineKeyboardButton]]:
+    return [
+        [_button(str(n), f"{CB_COUNT}:{n}") for n in range(5)],
+        [_button(texts.COUNT_MORE, f"{CB_COUNT}:more")],
+        [_button(texts.CANCEL, CB_CANCEL)],
+    ]
+
+
+async def _ask_count(update: Update, context: ContextTypes.DEFAULT_TYPE, sex: str):
+    spec = _counted(context)
+    spec["asking"] = sex
+    plural = _COUNT_KIN[spec["role"]][sex][1]
+    await _say(
+        update, texts.how_many(spec.get("subject"), plural), _kb(_count_rows())
+    )
+    return COUNTED
+
+
+async def _count_given(update: Update, context: ContextTypes.DEFAULT_TYPE, n: int):
+    spec = _counted(context)
+    spec["counts"][spec["asking"]] = n
+    if "F" not in spec["counts"]:
+        return await _ask_count(update, context, "F")
+
+    total = spec["counts"].get("M", 0) + spec["counts"].get("F", 0)
+    if total == 0:
+        context.user_data.pop("counted", None)
+        return await _offer_tour(update, context, texts.COUNTED_NONE_NOTED)
+
+    spec["queue"] = [
+        (sex, position)
+        for sex in ("M", "F")
+        for position in range(1, spec["counts"].get(sex, 0) + 1)
+    ]
+    if spec["role"] == submissions.SIBLING:
+        await _say(
+            update,
+            texts.ask_same_father_all(spec.get("subject"), total),
+            _kb(
+                [
+                    [_button(texts.YES_WORD, f"{CB_COUNT}:sf:yes")],
+                    [_button(texts.NO_WORD, f"{CB_COUNT}:sf:no")],
+                    [_button(texts.NOT_SURE, f"{CB_COUNT}:sf:unsure")],
+                ]
+            ),
+        )
+        return COUNTED
+    return await _ask_counted_name(update, context)
+
+
+async def _ask_counted_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    spec = _counted(context)
+    if not spec.get("queue"):
+        return await _counted_confirm(update, context)
+    sex, position = spec["queue"][0]
+    kin = _COUNT_KIN[spec["role"]][sex][0]
+    await _say(
+        update,
+        texts.counted_name(spec.get("subject"), position, kin),
+        _kb([[_button(texts.SKIP, f"{CB_COUNT}:skipname")], [_button(texts.CANCEL, CB_CANCEL)]]),
+    )
+    return COUNTED
+
+
+async def _counted_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    spec = _counted(context)
+    who = await store.contributor_state(update.effective_user.id)
+    if not spec.get("names"):
+        context.user_data.pop("counted", None)
+        return await _offer_tour(update, context)
+
+    owner = (
+        "your"
+        if _is_self(spec["about"], who)
+        else f"{spec.get('subject') or 'their'}'s"
+    )
+    by_sex: dict[str, list[str]] = {"M": [], "F": []}
+    for sex, name in spec["names"]:
+        by_sex[sex].append(name)
+    parts = []
+    for sex in ("M", "F"):
+        names = by_sex[sex]
+        if not names:
+            continue
+        kin_one, kin_many = _COUNT_KIN[spec["role"]][sex]
+        word = kin_one if len(names) == 1 else kin_many
+        verb = "is" if len(names) == 1 else "are"
+        parts.append(f"{_join(names)} {verb} {owner} {word}")
+    sentence = ", and ".join(parts)
+    if spec["role"] == submissions.SIBLING and spec.get("same_father") == "yes":
+        father = await _father_of_about(context, who, spec["about"])
+        if father:
+            spec["father"] = father
+            sentence += f", and their father is {father}"
+    await _say(
+        update,
+        f"{texts.CONFIRM_CHECK}\n\n{sentence}. Correct?",
+        _kb(
+            [
+                [_button(texts.CONFIRM_CORRECT, f"{CB_COUNT}:keep")],
+                [_button(texts.CONFIRM_CHANGE, f"{CB_COUNT}:redo")],
+            ]
+        ),
+    )
+    return COUNTED
+
+
+async def _counted_commit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    spec = context.user_data.pop("counted", {})
+    who = await store.contributor_state(update.effective_user.id)
+    submitted_by = submissions.submitter(
+        update.effective_user.id, person_id=who["person_id"], label=who["label"]
+    )
+    kind = (
+        submissions.ADD_SIBLING
+        if spec["role"] == submissions.SIBLING
+        else submissions.ADD_CHILD
+    )
+    added = 0
+    for sex, name in spec.get("names", []):
+        payload = submissions.build(
+            kind,
+            submitted_by=submitted_by,
+            about=dict(spec["about"]),
+            people=[
+                submissions.person(
+                    spec["role"],
+                    name,
+                    sex=sex,
+                    father_given_name=spec.get("father"),
+                )
+            ],
+        )
+        payload["_draft_id"] = _draft_id(context)
+        _basket(context).append(payload)
+        added += 1
+    return await _offer_tour(
+        update, context, texts.ADDED.format(summary=f"{added} added")
+    )
+
+
+async def on_counted_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.callback_query.answer()
+    parts = update.callback_query.data.split(":")
+    spec = _counted(context)
+
+    if parts[1] == "sf":
+        spec["same_father"] = parts[2]
+        return await _ask_counted_name(update, context)
+    if parts[1] == "keep":
+        return await _counted_commit(update, context)
+    if parts[1] == "redo":
+        spec["counts"] = {}
+        spec["names"] = []
+        spec.pop("queue", None)
+        return await _ask_count(update, context, "M")
+    if parts[1] == "skipname":
+        if spec.get("queue"):
+            spec["queue"].pop(0)
+        return await _ask_counted_name(update, context)
+    if parts[1] == "more":
+        await _say(update, texts.COUNT_ASK_NUMBER)
+        return COUNTED
+    spec_stage_number = int(parts[1])
+    return await _count_given(update, context, spec_stage_number)
+
+
+async def on_counted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    typed = (update.effective_message.text or "").strip()
+    spec = _counted(context)
+
+    if spec.get("queue"):
+        if understand.is_skip(typed):
+            spec["queue"].pop(0)
+            return await _ask_counted_name(update, context)
+        try:
+            name = flows.clean_name(typed)
+        except flows.FlowError as problem:
+            await _say(update, str(problem))
+            return COUNTED
+        sex, _position = spec["queue"].pop(0)
+        spec["names"].append((sex, name))
+        return await _ask_counted_name(update, context)
+
+    if "queue" in spec and not spec["queue"]:
+        # At the read-back: typed yes and no both work.
+        answer = understand.yes_no(typed)
+        if answer is True:
+            return await _counted_commit(update, context)
+        if answer is False:
+            spec["counts"] = {}
+            spec["names"] = []
+            spec.pop("queue", None)
+            return await _ask_count(update, context, "M")
+        return await _counted_confirm(update, context)
+
+    digits = re.sub(r"[^0-9]", "", typed)
+    if digits:
+        return await _count_given(update, context, min(int(digits), 30))
+    if understand.yes_no(typed) is False or understand.is_skip(typed):
+        return await _count_given(update, context, 0)
+    await _say(update, texts.COUNT_NOT_A_NUMBER, _kb(_count_rows()))
+    return COUNTED
 
 
 # ===========================================================================
