@@ -184,7 +184,7 @@ canvas.dragging { cursor: grabbing; }
 
 .legend i { display: inline-block; width: 1.4rem; height: 0; vertical-align: middle; margin-inline-end: 0.35rem; }
 .legend .descent { border-top: 1.5px solid var(--line-descent); }
-.legend .marriage { border-top: 1.5px dashed var(--line-marriage); }
+.legend .marriage { border-top: 3px double var(--line-marriage); }
 
 .hint {
   position: absolute;
@@ -591,18 +591,38 @@ function draw() {
     }
   }
 
-  ctx.strokeStyle = marriage;
-  ctx.setLineDash([4, 4]);
+  /* Marriage is drawn the way genealogy charts draw it: a bold double bar
+     between the two cards. A faint dash was easy to miss, and "who is married
+     to whom" is half of what a reader wants from the chart. Partners who sit
+     apart (cousin marriages pulled to opposite ends) keep a dashed line —
+     long and quiet, but unmistakably a link. */
   for (const [a, b] of DATA.unions) {
     const pa = PEOPLE.get(a), pb = PEOPLE.get(b);
     if (!pa || !pb || !visible(pa) || !visible(pb)) continue;
     const A = POS.get(a), B = POS.get(b);
-    ctx.beginPath();
-    ctx.moveTo(A.x, A.y);
-    ctx.lineTo(B.x, B.y);
-    ctx.stroke();
+    ctx.strokeStyle = marriage;
+    const adjacent = A.y === B.y && Math.abs(A.x - B.x) < COL_W * 1.6;
+    if (adjacent) {
+      const left = Math.min(A.x, B.x) + NODE_W / 2;
+      const right = Math.max(A.x, B.x) - NODE_W / 2;
+      ctx.lineWidth = 1.6;
+      for (const dy of [-2.5, 2.5]) {
+        ctx.beginPath();
+        ctx.moveTo(left, A.y + dy);
+        ctx.lineTo(right, A.y + dy);
+        ctx.stroke();
+      }
+    } else {
+      ctx.lineWidth = 1.6;
+      ctx.setLineDash([5, 4]);
+      ctx.beginPath();
+      ctx.moveTo(A.x, A.y);
+      ctx.lineTo(B.x, B.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
   }
-  ctx.setLineDash([]);
+  ctx.lineWidth = 1.2;
 
   const ink = css("--ink"), surface = css("--surface"), rule = css("--rule");
   const accent = css("--accent"), muted = css("--muted");
