@@ -1077,6 +1077,43 @@ class BrotherOrSisterTests(BotTestCase):
         ]
         self.assertEqual([e.get("sex") for e in entries], [None, "F"])
 
+    async def test_a_run_on_sister_is_not_a_brother(self):
+        """"My brothers are Toufic and Joseph and my sister Nawal" — the
+        first live tester's exact words, and Nawal came out a brother."""
+        chat = await self.fresh_contributor()
+        await chat.say("My brothers are Toufic and Joseph and my sister Nawal")
+        self.assertIn("Check the spelling", chat.text)
+        self.assertIn("Nawal as sister of", chat.text)
+        self.assertNotIn("one person or two", chat.transcript())
+
+    async def test_a_mixed_group_asks_about_everyone(self):
+        chat = await self.fresh_contributor()
+        await chat.say("My brothers and sisters are Tony, Mary and Sam")
+        self.assertIn("Is Tony your brother or sister?", chat.text)
+
+    async def test_naming_yourself_is_not_a_stranger(self):
+        """"My name is Steven my wife is Louisa and my children are Henri
+        and Sabine" — the children became his wives, hung off a stranger
+        called Steven Sukar who was in fact the man typing."""
+        chat = Conversation(user_id=7100)
+        await chat.start()
+        await chat.say("Steven")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Kalim")
+        await chat.tap(texts.SELF_MAN)
+        await chat.tap(texts.TOUR_MENU)
+        await chat.say(
+            "My name is Steven my wife is Louisa and my children are "
+            "Henri and Sabine"
+        )
+        self.assertNotIn("belong to", chat.transcript())
+        self.assertIn("Is Henri your son or daughter?", chat.text)
+        await chat.tap(texts.CHILD_SON)
+        await chat.tap(texts.CHILD_DAUGHTER)
+        self.assertIn("Louisa as wife of", chat.text)
+        self.assertIn("Henri as son of", chat.text)
+        self.assertIn("Sabine as daughter of", chat.text)
+
     async def test_children_are_asked_as_son_or_daughter(self):
         chat = await self.identified_as_khalil()
         await chat.say("My kids are Rohnda and Jason")

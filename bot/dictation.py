@@ -350,6 +350,55 @@ def _role_at(
     return best
 
 
+def _role_segments(line: str) -> list[str]:
+    """Split a run-on line wherever a NEW role word starts a new group.
+
+    "My brothers are Toufic and Joseph and my sister Nawal" is two groups,
+    not one — read as one, Nawal becomes a brother and nobody ever asks.
+    The split point pulls a possessive "my" back into the new group so the
+    subject-reset rule still sees it.
+
+    One exception: a role word used as a title — "Clemence Haddad, sister
+    clemence" — repeats a name already in the line, and is the same person,
+    not a new group."""
+    segments: list[str] = []
+    rest = line
+    while True:
+        lowered = rest.casefold()
+        first = _role_at(lowered)
+        if first is None:
+            break
+        search_from = first[5]
+        cut = None
+        while True:
+            following = _role_at(lowered, search_from)
+            if following is None:
+                break
+            word = lowered[following[4] : following[5]]
+            after = [
+                w.strip(understand.EDGE_PUNCTUATION)
+                for w in lowered[following[5] :].split()
+            ]
+            named = next((w for w in after if w and w not in FILLER), None)
+            already = set(
+                re.sub(r"[^a-z0-9 ]", " ", lowered[: following[4]]).split()
+            )
+            if word in TITLES and named and named in already:
+                search_from = following[5]
+                continue
+            cut = following[4]
+            break
+        if cut is None:
+            break
+        possessive = re.search(r"\bmy\s+$", rest[:cut], re.IGNORECASE)
+        if possessive:
+            cut = possessive.start()
+        segments.append(rest[:cut])
+        rest = rest[cut:]
+    segments.append(rest)
+    return segments
+
+
 def _names_in(
     chunk: str,
     subject_name: str | None = None,
@@ -599,125 +648,141 @@ def parse(
             if not understand.tidy(line):
                 continue
 
-        found = _role_at(line.casefold())
-        if found is not None:
-            current_role, current_sex, pair_expected, plural, start, end = found
-            prefix = line[:start].strip(" :,-—")
-            # "my brothers", "my parents" — first person resets the subject to
-            # the speaker, whoever an earlier line was about.
-            if re.search(r"\bmy\b", prefix, re.IGNORECASE):
-                about = None
-            # "Kalims sisters are Dibeh and Sonia" — the word in front of the
-            # relationship is a possessive naming somebody we already know,
-            # not a relative called Kalims.
-            owner = _known_owner(prefix, known)
-            if owner is not None:
-                about = owner
-                prefix = ""
-            remainder = (prefix + " " + line[end:]).strip(" :,-—")
-            # "kids of #18 are..." / "children of John:" — the owner can sit
-            # AFTER the role word too.
-            trailing = re.match(
-                r"^(?:of|for|to)\s+(#?\w+)[,:]?\s*", remainder, re.IGNORECASE
-            )
-            if trailing:
-                owner = _known_owner(trailing.group(1), known)
+        last_part: tuple | None = None
+        for part in _role_segments(line):
+            found = _role_at(part.casefold())
+            if found is not None:
+                role_word_sex = found[1]
+                current_role, current_sex, pair_expected, plural, start, end = found
+                # "my brothers and sisters are Tony, Mary and Sam" — the first
+                # role word owned no names, so this one widens the group rather
+                # than starting a fresh one: same role, sex unknown, ask each.
+                if (
+                    last_part is not None
+                    and not last_part[2]
+                    and last_part[0] == current_role
+                    and last_part[1] != role_word_sex
+                ):
+                    current_sex = None
+                    plural = True
+                prefix = part[:start].strip(" :,-—")
+                # "my brothers", "my parents" — first person resets the subject to
+                # the speaker, whoever an earlier line was about.
+                if re.search(r"\bmy\b", prefix, re.IGNORECASE):
+                    about = None
+                # "Kalims sisters are Dibeh and Sonia" — the word in front of the
+                # relationship is a possessive naming somebody we already know,
+                # not a relative called Kalims.
+                owner = _known_owner(prefix, known)
                 if owner is not None:
                     about = owner
-                    remainder = remainder[trailing.end():]
-        else:
-            remainder = line
-
-        if current_role is None:
-            continue
-
-        # "Khalil, Hanna (John) married to Therese, Youssef married to Wafaq,
-        # Waleena, Rafqa" — marriages sit INSIDE the list, one per person, so
-        # each comma-segment carries its own. Splitting the whole line at the
-        # first "married to" once turned three sisters into Hanna's wives.
-        def add_person(person: _Name, index: int) -> Mention:
-            role, sex = current_role, current_sex
-            uncertain = []
-            if pair_expected:
-                role = submissions.FATHER if index == 0 else submissions.MOTHER
-                sex = "M" if index == 0 else "F"
-                uncertain.append(
-                    "which of the two parents is the father, from the order "
-                    "you listed them"
+                    prefix = ""
+                remainder = (prefix + " " + part[end:]).strip(" :,-—")
+                # "kids of #18 are..." / "children of John:" — the owner can sit
+                # AFTER the role word too.
+                trailing = re.match(
+                    r"^(?:of|for|to)\s+(#?\w+)[,:]?\s*", remainder, re.IGNORECASE
                 )
-            if person.maybe_two and not pair_expected:
-                uncertain.append(
-                    f"whether {person.given} {person.family} is one person or two"
-                )
-            mention = Mention(
-                role=role,
-                given_name=person.given,
-                family_name=person.family,
-                sex=sex,
-                also_known_as=person.also_known_as,
-                note="; ".join(person.remarks) or None,
-                uncertain=uncertain,
-            )
-            add(mention)
-            return mention
+                if trailing:
+                    owner = _known_owner(trailing.group(1), known)
+                    if owner is not None:
+                        about = owner
+                        remainder = remainder[trailing.end():]
+            else:
+                remainder = part
 
-        def add_spouse_of(partner: Mention, person: _Name) -> None:
-            add(
-                Mention(
-                    role=submissions.SPOUSE,
+            if current_role is None:
+                continue
+
+            # "Khalil, Hanna (John) married to Therese, Youssef married to Wafaq,
+            # Waleena, Rafqa" — marriages sit INSIDE the list, one per person, so
+            # each comma-segment carries its own. Splitting the whole line at the
+            # first "married to" once turned three sisters into Hanna's wives.
+            def add_person(person: _Name, index: int) -> Mention:
+                role, sex = current_role, current_sex
+                uncertain = []
+                if pair_expected:
+                    role = submissions.FATHER if index == 0 else submissions.MOTHER
+                    sex = "M" if index == 0 else "F"
+                    uncertain.append(
+                        "which of the two parents is the father, from the order "
+                        "you listed them"
+                    )
+                if person.maybe_two and not pair_expected:
+                    uncertain.append(
+                        f"whether {person.given} {person.family} is one person or two"
+                    )
+                mention = Mention(
+                    role=role,
                     given_name=person.given,
                     family_name=person.family,
-                    sex=_opposite(partner.sex),
+                    sex=sex,
                     also_known_as=person.also_known_as,
-                    spouse_of=partner.label(),
-                    uncertain=["whether a husband or a wife was meant"]
-                    if _opposite(partner.sex)
-                    else [],
+                    note="; ".join(person.remarks) or None,
+                    uncertain=uncertain,
                 )
-            )
+                add(mention)
+                return mention
 
-        if MARRIAGE.search(remainder):
-            count = 0
-            for segment in remainder.split(","):
-                spouse_part = None
-                if MARRIAGE.search(segment):
-                    segment, spouse_part = MARRIAGE.split(segment, maxsplit=1)[:2]
-                segment, segment_note = _strip_notes(segment)
-                added_here: list[Mention] = []
-                for person in _names_in(segment, subject_name, family_names,
-                                        plural=plural):
-                    added_here.append(add_person(person, count))
-                    count += 1
-                if segment_note and len(added_here) == 1:
-                    added_here[0].note = segment_note
-                elif segment_note:
-                    loose_notes.append(segment_note)
-                if spouse_part and added_here:
-                    spouse_part, spouse_note = _strip_notes(spouse_part)
-                    if spouse_note:
-                        loose_notes.append(spouse_note)
-                    named = _names_in(spouse_part, subject_name, family_names)
-                    if named:
-                        # "married to Therese and Youssef" — one spouse each;
-                        # whoever follows the "and" is back on the list, not a
-                        # second wife.
-                        add_spouse_of(added_here[-1], named[0])
-                        for person in named[1:]:
-                            added_here.append(add_person(person, count))
-                            count += 1
-            continue
+            def add_spouse_of(partner: Mention, person: _Name) -> None:
+                add(
+                    Mention(
+                        role=submissions.SPOUSE,
+                        given_name=person.given,
+                        family_name=person.family,
+                        sex=_opposite(partner.sex),
+                        also_known_as=person.also_known_as,
+                        spouse_of=partner.label(),
+                        uncertain=["whether a husband or a wife was meant"]
+                        if _opposite(partner.sex)
+                        else [],
+                    )
+                )
 
-        remainder, note = _strip_notes(remainder)
-        people = _names_in(remainder, subject_name, family_names, plural=plural)
+            if MARRIAGE.search(remainder):
+                count = 0
+                for segment in remainder.split(","):
+                    spouse_part = None
+                    if MARRIAGE.search(segment):
+                        segment, spouse_part = MARRIAGE.split(segment, maxsplit=1)[:2]
+                    segment, segment_note = _strip_notes(segment)
+                    added_here: list[Mention] = []
+                    for person in _names_in(segment, subject_name, family_names,
+                                            plural=plural):
+                        added_here.append(add_person(person, count))
+                        count += 1
+                    if segment_note and len(added_here) == 1:
+                        added_here[0].note = segment_note
+                    elif segment_note:
+                        loose_notes.append(segment_note)
+                    if spouse_part and added_here:
+                        spouse_part, spouse_note = _strip_notes(spouse_part)
+                        if spouse_note:
+                            loose_notes.append(spouse_note)
+                        named = _names_in(spouse_part, subject_name, family_names)
+                        if named:
+                            # "married to Therese and Youssef" — one spouse each;
+                            # whoever follows the "and" is back on the list, not a
+                            # second wife.
+                            add_spouse_of(added_here[-1], named[0])
+                            for person in named[1:]:
+                                added_here.append(add_person(person, count))
+                                count += 1
+                last_part = (current_role, current_sex, count > 0)
+                continue
 
-        if note and len(people) != 1:
-            loose_notes.append(note)
-            note = None
+            remainder, note = _strip_notes(remainder)
+            people = _names_in(remainder, subject_name, family_names, plural=plural)
 
-        for index, person in enumerate(people):
-            mention = add_person(person, index)
-            if note and len(people) == 1:
-                mention.note = mention.note or note
+            if note and len(people) != 1:
+                loose_notes.append(note)
+                note = None
+
+            for index, person in enumerate(people):
+                mention = add_person(person, index)
+                if note and len(people) == 1:
+                    mention.note = mention.note or note
+            last_part = (current_role, current_sex, bool(people))
 
     return Reading(
         people=_resolve_titles(mentions),

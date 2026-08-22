@@ -1295,13 +1295,26 @@ async def _absorb_dictation(
     user_id = update.effective_user.id
     who = await store.contributor_state(user_id)
 
+    def resolves_to_self(found: dict[str, Any]) -> bool:
+        """"My name is Steven" — that's the contributor, not a stranger who
+        happens to share their name. Telling somebody their own family
+        "belongs to Steven Sukar rather than to you" reads as broken."""
+        if who["person_id"] and found.get("person_id") == who["person_id"]:
+            return True
+        return bool(
+            who["identify_submission_id"]
+            and found.get("submission_id") == who["identify_submission_id"]
+        )
+
     lead_extra = ""
     if reading.subject:
         # Best effort: the subject may be in the tree, in the basket — or
         # introduced by this very message, in which case the per-line anchors
         # place her relatives and there is nothing to bail out over.
         found = await _resolve_named_subject(update, context, reading.subject)
-        if found is not None:
+        if found is not None and resolves_to_self(found):
+            _set_cursor(context, None)
+        elif found is not None:
             _set_cursor(context, found)
             lead_extra = "\n\n" + texts.DICTATED_SUBJECT.format(name=found["label"])
 
@@ -1311,10 +1324,16 @@ async def _absorb_dictation(
     # message, so resolution happens as groups are stashed, not before.
     anchors: dict[str, dict[str, Any] | None] = {}
     for name in dict.fromkeys(m.about for m in reading.people if m.about):
-        anchors[name] = await _resolve_named_subject(update, context, name)
+        resolved = await _resolve_named_subject(update, context, name)
+        if resolved is not None and resolves_to_self(resolved):
+            resolved = dict(resolved)
+            resolved["is_self"] = True
+        anchors[name] = resolved
     unplaced: list[str] = []
     placed = sorted(
-        found["label"] for found in anchors.values() if found is not None
+        found["label"]
+        for found in anchors.values()
+        if found is not None and not found.get("is_self")
     )
     if placed:
         lead_extra += "\n\n" + texts.DICTATED_ABOUT_OTHERS.format(
@@ -1345,13 +1364,21 @@ async def _absorb_dictation(
         """Whoever this mention hangs off: this message, the tree, or the cursor."""
         if not mention.about:
             return dict(about)
+        found = anchors.get(mention.about)
+        if found is not None and found.get("is_self"):
+            # Their own name: these are the contributor's relatives, whatever
+            # the cursor was doing.
+            return submissions.subject(
+                person_id=who["person_id"],
+                submission_id=who["identify_submission_id"],
+                label=who["label"] or "themselves",
+            )
         # Introduced earlier in this same message?
         anchor = drafts_by_label.get(mention.about)
         if anchor is not None:
             subject = submissions.subject(label=mention.about)
             subject["draft_id"] = anchor
             return subject
-        found = anchors.get(mention.about)
         if found is None:
             if mention.about not in unplaced:
                 unplaced.append(mention.about)
