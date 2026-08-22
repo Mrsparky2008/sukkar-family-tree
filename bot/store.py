@@ -436,6 +436,59 @@ async def name_sex_hint(given_name: str) -> str | None:
     return await _run(_name_sex_hint, given_name)
 
 
+def _own_submission_exists(
+    conn: sqlite3.Connection,
+    telegram_user_id: int,
+    kind: str,
+    about_person_id: int | None = None,
+    about_submission_id: int | None = None,
+    about_self: bool = False,
+) -> bool:
+    state = _contributor_state(conn, telegram_user_id)
+    for row in db.list_submissions_by_user(conn, telegram_user_id, limit=100):
+        payload = db.submission_payload(row)
+        if payload.get("kind") != kind:
+            continue
+        about = payload.get("about") or {}
+        if about_self:
+            if state["person_id"] is not None:
+                if about.get("person_id") == state["person_id"]:
+                    return True
+            elif (
+                state["identify_submission_id"]
+                and about.get("submission_id") == state["identify_submission_id"]
+            ):
+                return True
+        else:
+            if about_person_id and about.get("person_id") == about_person_id:
+                return True
+            if (
+                about_submission_id
+                and about.get("submission_id") == about_submission_id
+            ):
+                return True
+    return False
+
+
+async def own_submission_exists(
+    telegram_user_id: int,
+    kind: str,
+    about_person_id: int | None = None,
+    about_submission_id: int | None = None,
+    about_self: bool = False,
+) -> bool:
+    """Whether this contributor already sent a claim of this kind about this
+    person — what lets the tour skip a step somebody has already done."""
+    return await _run(
+        _own_submission_exists,
+        telegram_user_id,
+        kind,
+        about_person_id,
+        about_submission_id,
+        about_self,
+    )
+
+
 def _count_contributions(conn: sqlite3.Connection, telegram_user_id: int) -> int:
     total = 0
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):

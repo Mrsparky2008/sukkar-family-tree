@@ -831,6 +831,41 @@ _TOUR_DEFAULT_ROLE = {
 }
 
 
+async def _role_recorded(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    who: dict[str, Any],
+    kind: str,
+    ref: dict[str, Any] | None,
+) -> bool:
+    """Whether this kind of relative is already down for this person —
+    basket or queue. The tour asking "Any children?" seconds after the
+    contributor added their children reads as not paying attention."""
+    for payload in _basket(context):
+        if payload.get("kind") != kind:
+            continue
+        about = payload.get("about") or {}
+        if ref is None:
+            if _is_self(about, who):
+                return True
+        elif (
+            (ref.get("draft_id") and about.get("draft_id") == ref["draft_id"])
+            or (ref.get("person_id") and about.get("person_id") == ref["person_id"])
+            or (
+                ref.get("submission_id")
+                and about.get("submission_id") == ref["submission_id"]
+            )
+        ):
+            return True
+    return await store.own_submission_exists(
+        update.effective_user.id,
+        kind,
+        about_person_id=(ref or {}).get("person_id"),
+        about_submission_id=(ref or {}).get("submission_id"),
+        about_self=ref is None,
+    )
+
+
 async def _tour_next(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> dict[str, Any] | None:
@@ -855,6 +890,11 @@ async def _tour_next(
             ) >= 2:
                 done.append(step)
                 continue
+            if step != "own_parents" and await _role_recorded(
+                update, context, who, flow_kind, None
+            ):
+                done.append(step)
+                continue
             return {
                 "step": step,
                 "flow": flow_kind,
@@ -871,6 +911,11 @@ async def _tour_next(
         if flow_kind == submissions.ADD_PARENTS and len(
             await _recorded_parents(context, who, found)
         ) >= 2:
+            done.append(step)
+            continue
+        if flow_kind != submissions.ADD_PARENTS and await _role_recorded(
+            update, context, who, flow_kind, found
+        ):
             done.append(step)
             continue
         return {

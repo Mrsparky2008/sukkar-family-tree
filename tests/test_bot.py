@@ -1296,6 +1296,33 @@ class GuidedTourTests(BotTestCase):
         self.assertIn(texts.MENU_ADD_CHILD, chat.buttons)
 
 
+class TourAwarenessTests(BotTestCase):
+    """The tour never asks a question the data has already answered."""
+
+    async def test_no_any_children_after_the_children_are_in(self):
+        chat = Conversation(user_id=7400)
+        await chat.start()
+        await chat.say("Zaher")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
+        await chat.tap(texts.TOUR_SKIP)          # parents later
+        await chat.tap(texts.TOUR_NONE_SIBLINGS)
+        await chat.tap(texts.TOUR_LETS_GO)       # married — add her
+        await chat.say("Louisa")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_CHILDREN_MINE)  # the panel, not the tour
+        await chat.tap("1")
+        await chat.tap("1")
+        await chat.say("Henri")
+        await chat.say("Sabine")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        # The children are in; the tour must not ask "Any children?"
+        self.assertNotIn("Any children?", chat.text)
+        self.assertIn("people so far", chat.text)
+
+
 class CountedCaptureTests(BotTestCase):
     """How many brothers, how many sisters — then exactly that many names."""
 
