@@ -97,6 +97,8 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         return chat
 
     async def send_basket(self, chat: Conversation):
+        if texts.CONFIRM_CORRECT in chat.buttons:
+            await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap("Review and send")
         await chat.tap("Send all")
 
@@ -404,13 +406,16 @@ class AddChildTests(BotTestCase):
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
         self.assertIn("Rita", chat.text)
-        self.assertIn(texts.CLIMB_YES, chat.buttons)
+        self.assertIn(texts.CONFIRM_CORRECT, chat.buttons)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        self.assertIn(texts.NEXT_ANOTHER_CHILD, chat.buttons)
 
     async def test_carrying_on_returns_to_the_menu(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Rita")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
 
@@ -424,6 +429,7 @@ class AddParentsTests(BotTestCase):
 
         await chat.say("Nada")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
 
@@ -447,6 +453,7 @@ class AddParentsTests(BotTestCase):
         # father pre-filled from signup; only the mother is asked
         await chat.say("Nada")
         await chat.say("Karam")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
 
@@ -489,6 +496,7 @@ class AddSiblingAndSpouseTests(BotTestCase):
         self.assertIn("her first name", chat.text)
 
         await chat.say("Mariam")
+        await chat.tap(texts.YES_WORD)
         await self.send_basket(chat)
 
         entry = self.queued()[0]["payload"]["people"][0]
@@ -519,19 +527,23 @@ class ClimbTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("Nada")
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.CLIMB_YES)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         self.assertIn("Fares's father", chat.text)
 
     async def test_three_generations_in_one_sitting(self):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)              # mother unknown
-        await chat.tap(texts.CLIMB_YES)         # now on Fares
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.CLIMB_YES)         # now on Elias
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Elias"))
         await chat.say("Semaan")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
 
@@ -552,9 +564,11 @@ class ClimbTests(BotTestCase):
         await chat.tap("parents")
         await chat.say("Tanios")
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.CLIMB_YES)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Tanios"))
         await chat.say("Boulos")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await self.send_basket(chat)
 
@@ -570,15 +584,17 @@ class ClimbTests(BotTestCase):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.CLIMB_YES)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.ADD_MORE)
-        # Declining the climb leaves the cursor where it was, on Fares.
-        self.assertIn("Adding relatives for: Fares", chat.text)
-        self.assertIn("Add Fares's parents", chat.buttons)
-        await chat.tap("Add a brother or sister of Fares")
-        self.assertIn("brother or a sister of Fares", chat.text)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        # The panel names whoever the cursor is on.
+        self.assertIn(
+            texts.NEXT_SIBLINGS_OF.format(name="Elias"), chat.buttons
+        )
+        await chat.tap(texts.NEXT_SIBLINGS_OF.format(name="Elias"))
+        self.assertIn("brother or a sister of Elias", chat.text)
 
 
 class SwitchSubjectTests(BotTestCase):
@@ -615,10 +631,13 @@ class ReviewTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_DAUGHTER)
         await chat.say("Ritta")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
         await chat.say("Sami")
+        await chat.tap(texts.YES_WORD)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         return chat
 
@@ -658,9 +677,11 @@ class ReviewTests(BotTestCase):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
-        await chat.tap(texts.CLIMB_YES)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
 
         await chat.tap("Review and send")
@@ -675,6 +696,7 @@ class ReviewTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Tanios")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await chat.tap("Review and send")
         self.assertIn("Send all 3", " ".join(chat.buttons))
@@ -686,6 +708,7 @@ class ReviewTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Tanios")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await chat.tap("Review and send")
         self.assertIn("Send all 1", " ".join(chat.buttons))
@@ -702,6 +725,7 @@ class DuplicateFlaggingTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
         await chat.say("Georges")
+        await chat.tap(texts.YES_WORD)
         await self.send_basket(chat)
         self.assertEqual(self.queued()[0]["matched_person_id"], self.ids["georges"])
 
@@ -710,6 +734,7 @@ class DuplicateFlaggingTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
         await chat.say("Georges")
+        await chat.tap(texts.YES_WORD)
         await self.send_basket(chat)
         self.assertEqual(self.queued()[0]["status"], "pending")
         self.assertEqual(self.people_count(), 12)
@@ -948,19 +973,20 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("dunno")
-        self.assertIn(texts.CLIMB_YES, chat.buttons)
+        self.assertIn(texts.CONFIRM_CORRECT, chat.buttons)
 
     async def test_ok_is_a_yes_at_the_climb(self):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.say("Ok")
-        self.assertIn("Fares's father", chat.text)
+        self.assertIn(texts.NEXT_PROMPT, chat.text)
 
     async def test_nah_is_a_no_at_the_climb(self):
         chat = await self.fresh_contributor()
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.say("nah")
         self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
 
@@ -970,14 +996,15 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.tap(texts.SKIP)
         await chat.say("hmm what")
-        self.assertIn(texts.CLIMB_YES, chat.buttons)
-        self.assertIn("parents", chat.text)
+        self.assertIn(texts.CONFIRM_CORRECT, chat.buttons)
+        self.assertIn("Correct?", chat.text)
 
     async def test_typing_send_at_the_review_screen_sends(self):
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Sami")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await chat.tap("Review and send")
         await chat.say("yes")
@@ -988,6 +1015,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_CHILD)
         await chat.tap(texts.CHILD_SON)
         await chat.say("Sami")
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
         await chat.tap("Review and send")
         await chat.say("what is this")
@@ -1012,12 +1040,17 @@ class CursorAwarenessTests(BotTestCase):
         await chat.tap(texts.MENU_ADD_PARENTS)
         await chat.say("Wadiha")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
 
         await chat.tap(texts.MENU_ADD_SIBLING)
         await chat.tap(texts.SIBLING_BROTHER)
         await chat.say("Toufic")
-        await chat.tap(texts.CLIMB_YES)
+        await chat.tap(texts.YES_WORD)
+        self.assertIn("his father is Fares", chat.text)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_SPOUSE_OF.format(name="Toufic"))
+        await chat.tap(texts.CANCEL)
 
         self.assertIn("Toufic — your brother", chat.text)
         self.assertNotIn("Add Toufic's parents", chat.buttons)
@@ -1169,7 +1202,7 @@ class GuidedTourTests(BotTestCase):
 
     async def test_a_new_signup_is_led_not_dropped_at_a_menu(self):
         chat = await self.raw_signup()
-        self.assertIn("starting with your parents", chat.text)
+        self.assertIn("your parents first", chat.text)
         self.assertIn(texts.TOUR_LETS_GO, chat.buttons)
         self.assertIn(texts.TOUR_MENU, chat.buttons)
 
@@ -1183,26 +1216,37 @@ class GuidedTourTests(BotTestCase):
         await chat.tap(texts.TOUR_LETS_GO)      # my parents
         await chat.say("Wadiha")                # mother; father known from signup
         await chat.tap(texts.SKIP)              # her maiden name
-        await chat.tap(texts.ADD_MORE)          # decline the climb
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.ADD_MORE)          # back to the tour
 
         self.assertIn("brothers and sisters", chat.text)
-        await chat.say("My brother Tony and my sister Mary")
-        await chat.tap("Send all")
+        await chat.tap(texts.TOUR_LETS_GO)
+        await chat.tap(texts.SIBLING_BROTHER)
+        await chat.say("Tony")
+        await chat.tap(texts.YES_WORD)          # same father
+        self.assertIn("his father is Fares", chat.text)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_ANOTHER_SIBLING)
+        await chat.tap(texts.SIBLING_SISTER)
+        await chat.say("Mary")
+        await chat.tap(texts.YES_WORD)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.ADD_MORE)
 
         self.assertIn("married", chat.text)     # own household next
-        await chat.tap(texts.TOUR_NONE_FAMILY)
+        await chat.tap(texts.TOUR_NOT_MARRIED)
+        self.assertIn("children", chat.text.lower())
+        await chat.tap(texts.TOUR_NO_CHILDREN)
 
-        self.assertIn("Fares's parents", chat.text)   # grandparents, father's side
+        self.assertIn("Fares's parents", chat.text)   # grandparents
         await chat.tap(texts.TOUR_LETS_GO)
         await chat.say("Elias")
         await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
 
         self.assertIn("Did Fares have brothers and sisters", chat.text)
-        self.assertIn("married", chat.text)     # uncles' wives, aunties' husbands
-        await chat.say("His brother Semaan married Rima")
-        await chat.tap("Send all")
-
+        await chat.tap(texts.TOUR_SKIP)
         self.assertIn("Wadiha's parents", chat.text)  # mother's side next
         await chat.tap(texts.TOUR_SKIP)
         self.assertIn("Did Wadiha have brothers and sisters", chat.text)
@@ -1219,9 +1263,11 @@ class GuidedTourTests(BotTestCase):
         self.assertIn("married", chat.text)
         await chat.say("My wife is Laila")
         await chat.tap("Send all")
+        self.assertIn("children", chat.text.lower())
+        await chat.tap(texts.TOUR_NO_CHILDREN)
         # Parents and siblings never come back; with no parents named there
         # is no grandparent side to offer, so the tour signs off.
-        self.assertNotIn("starting with your parents", chat.text)
+        self.assertNotIn("your parents first", chat.text)
         self.assertIn("people so far", chat.text)
 
     async def test_a_linked_contributor_skips_the_tour(self):

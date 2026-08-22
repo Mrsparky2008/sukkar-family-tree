@@ -70,24 +70,23 @@ IDENTITY_ALREADY_LINKED = "You're already in as {name}."
 # Every step can be skipped, the menu is always one tap away, and nothing is
 # ever asked twice.
 
-TOUR_LETS_GO = "Let's do it"
+TOUR_LETS_GO = "Yes — let's add them"
 TOUR_SKIP = "Skip for now"
 TOUR_MENU = "I'll choose myself"
 TOUR_NONE_SIBLINGS = "No brothers or sisters"
-TOUR_NONE_FAMILY = "Not married"
-TOUR_GO_ON = "Great — type their names."
+TOUR_NOT_MARRIED = "Not married"
+TOUR_NO_CHILDREN = "No children"
+TOUR_NONE = "No"
 
-TOUR_OWN_PARENTS = "Let's build your corner of the tree, starting with your parents."
+TOUR_OWN_PARENTS = "Let's start building your family — your parents first."
 
 TOUR_OWN_SIBLINGS = (
-    "Do you have brothers and sisters? Type them all in one go, like:\n\n"
-    "My brothers Tony and Joe, and my sister Mary. Tony married Rima."
+    "Do you have brothers and sisters? I'll take them one at a time."
 )
 
-TOUR_OWN_FAMILY = (
-    "What about your own family — are you married? Kids?\n\n"
-    "My wife is Laila, our kids are Sami, Rita and Joe."
-)
+TOUR_OWN_SPOUSE = "Are you married?"
+
+TOUR_OWN_CHILDREN = "Any children?"
 
 
 def tour_grandparents(parent: str) -> str:
@@ -98,12 +97,9 @@ def tour_grandparents(parent: str) -> str:
 
 
 def tour_parent_siblings(parent: str, sex: str | None) -> str:
-    his = "His" if sex == "M" else "Her" if sex == "F" else "Their"
     return (
         f"Did {parent} have brothers and sisters? They're your uncles and "
-        f"aunties — and who each of them married matters just as much:\n\n"
-        f"{his} brother Tony married Rima, {his.lower()} sister Mary "
-        f"married Joseph Karam."
+        f"aunties — one at a time, and who each of them married counts too."
     )
 
 
@@ -275,6 +271,17 @@ SELF_MISREAD = (
 MATCH_PENDING_SUFFIX = " (added recently, waiting for review)"
 
 
+def ask_same_father(subject: str | None) -> str:
+    whose = "you" if not subject else subject
+    return f"Same father as {whose}?"
+
+
+YES_WORD = "Yes"
+NO_WORD = "No"
+
+ASK_SIBLING_FATHER = "What's {his_her} father's first name?"
+
+
 def ask_sibling_sex(subject: str | None) -> str:
     if not subject:
         return ASK_SIBLING_SEX
@@ -352,6 +359,24 @@ CONFIRM_SUBMISSION = "Here's what I'll send:"
 # --- the basket ------------------------------------------------------------
 
 ADDED = "Got it — {summary}."
+
+# --- the check before anything sticks --------------------------------------
+
+CONFIRM_CHECK = "Just checking:"
+CONFIRM_CORRECT = "Correct"
+CONFIRM_CHANGE = "Change it"
+
+# --- what next -------------------------------------------------------------
+#
+# After each person, the obvious next moves — concrete, named, one tap.
+
+NEXT_PROMPT = "What next?"
+NEXT_ANOTHER_SIBLING = "Add another brother or sister"
+NEXT_ANOTHER_CHILD = "Add another child"
+NEXT_SPOUSE_OF = "Add {name}'s husband or wife"
+NEXT_CHILDREN_OF = "Add {name}'s children"
+NEXT_PARENTS_OF = "Add {name}'s parents"
+NEXT_SIBLINGS_OF = "Add {name}'s brothers and sisters"
 
 # --- a whole family in one message ----------------------------------------
 

@@ -46,7 +46,8 @@ log = logging.getLogger(__name__)
     EDIT_VALUE,
     CLARIFY,
     TOUR,
-) = range(13)
+    CONFIRM_PERSON,
+) = range(14)
 
 # --- callback data ---------------------------------------------------------
 
@@ -74,6 +75,9 @@ CB_SEX = "sexq"
 CB_LINK = "linkq"
 CB_SELF = "selfq"
 CB_TOUR = "tour"
+CB_KEEP = "keep"
+CB_REDO = "redo"
+CB_NEXT = "next"
 
 
 # ===========================================================================
@@ -474,6 +478,88 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
         )
         return CONFIRM_SUBMIT
 
+    # "Yes" to same-father: the sibling inherits whatever the subject's own
+    # record says the father is called — context for the matcher, and for
+    # the read-back below.
+    if (
+        flow.kind == submissions.ADD_SIBLING
+        and state["answers"].get("same_father") == flows.SAME_FATHER_YES
+    ):
+        entry = submissions.primary_person(payload)
+        if entry is not None and not entry.get("father_given_name"):
+            entry["father_given_name"] = await _father_of_about(
+                context, who, payload.get("about") or {}
+            )
+
+    # Read the relationship back before it sticks. One tap for the person
+    # who typed it right; a saved cleanup for everyone else.
+    await _say(
+        update,
+        f"{texts.CONFIRM_CHECK}\n\n{_echo_sentence(payload, who)}",
+        _kb(
+            [
+                [_button(texts.CONFIRM_CORRECT, CB_KEEP)],
+                [_button(texts.CONFIRM_CHANGE, CB_REDO)],
+            ]
+        ),
+    )
+    return CONFIRM_PERSON
+
+
+async def _father_of_about(
+    context: ContextTypes.DEFAULT_TYPE, who: dict[str, Any], about: dict[str, Any]
+) -> str | None:
+    """What the subject's own record calls their father, for a sibling to share."""
+    if about.get("person_id"):
+        found = await store.person_father_given(about["person_id"])
+        if found:
+            return found
+    if _is_self(about, who):
+        return who.get("father_given_name")
+    return None
+
+
+def _echo_sentence(payload: dict[str, Any], who: dict[str, Any]) -> str:
+    """"Sarkis is your brother, and his father is Kalim." — the read-back."""
+    about = payload.get("about") or {}
+    owner = (
+        "your"
+        if _is_self(about, who)
+        else f"{(about.get('label') or 'their').split()[0]}'s"
+    )
+    parts = []
+    father = None
+    father_of = None
+    for entry in payload.get("people") or []:
+        kind, fixed = _ROLE_KIN.get(entry.get("role") or "", (None, None))
+        word = (
+            texts.kin_word(kind, fixed or entry.get("sex"))
+            if kind
+            else entry.get("role") or "relative"
+        )
+        parts.append(f"{submissions.person_label(entry)} is {owner} {word}")
+        if entry.get("father_given_name") and entry.get("role") == submissions.SIBLING:
+            father = entry["father_given_name"]
+            father_of = texts.his_her(entry.get("sex"))
+    sentence = ", and ".join(parts)
+    if father:
+        sentence += f", and {father_of} father is {father}"
+    return sentence + ". Correct?"
+
+
+async def on_person_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    state = _state(context)
+    payload = state.get("payload")
+    if payload is None:
+        return await _show_menu(update, context, texts.ERROR)
+
+    if query.data == CB_REDO:
+        flow = flows.BY_KIND[state["kind"]]
+        _begin(context, flow, **state.get("extra", {}))
+        return await _ask(update, context)
+
     draft_id = _draft_id(context)
     payload["_draft_id"] = draft_id
     _basket(context).append(payload)
@@ -481,8 +567,45 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
     return await _after_add(update, context, payload)
 
 
+async def on_person_confirm_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer = understand.yes_no(update.effective_message.text or "")
+    fake = update
+    if answer is True:
+        update.callback_query = None
+        state = _state(context)
+        payload = state.get("payload")
+        if payload is None:
+            return await _show_menu(update, context, texts.ERROR)
+        draft_id = _draft_id(context)
+        payload["_draft_id"] = draft_id
+        _basket(context).append(payload)
+        _reset(context)
+        return await _after_add(update, context, payload)
+    if answer is False:
+        state = _state(context)
+        flow = flows.BY_KIND[state["kind"]]
+        _begin(context, flow, **state.get("extra", {}))
+        return await _ask(update, context)
+    # Not a yes or a no: re-show the check with its buttons rather than
+    # leaving them staring at a message with nothing to tap.
+    who = await store.contributor_state(update.effective_user.id)
+    payload = _state(context).get("payload") or {}
+    await _say(
+        fake,
+        f"{texts.CONFIRM_CHECK}\n\n{_echo_sentence(payload, who)}",
+        _kb(
+            [
+                [_button(texts.CONFIRM_CORRECT, CB_KEEP)],
+                [_button(texts.CONFIRM_CHANGE, CB_REDO)],
+            ]
+        ),
+    )
+    return CONFIRM_PERSON
+
+
 async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
-    """Confirm what went in the basket and offer the obvious next step."""
+    """Name what just went in, then offer the obvious next moves — concrete,
+    named, one tap each. "Add Sarkis's wife" beats a menu every time."""
     added = texts.ADDED.format(summary=submissions.describe(payload))
 
     entries = [
@@ -491,57 +614,91 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
         if entry.get("role") != submissions.SELF
     ]
     entries.sort(key=lambda e: 0 if e["role"] == submissions.FATHER else 1)
+    if not entries:
+        return await _show_menu(update, context, added)
 
-    if entries:
-        target = entries[0]
-        # Whose parents are unknown, climb toward them. A sibling's or child's
-        # parents are already here — for them the useful question is their own
-        # wife, husband and children.
-        mode = (
-            "parents"
-            if target["role"] in (submissions.FATHER, submissions.MOTHER,
-                                  submissions.SPOUSE)
-            else "family"
-        )
-        context.user_data["climb_to"] = {
-            "label": submissions.person_label(target),
-            "draft_id": payload["_draft_id"],
-            "mode": mode,
+    cursor = _cursor(context)
+    role = entries[0]["role"]
+    draft_id = payload["_draft_id"]
+
+    def ref(entry) -> dict[str, Any]:
+        return {
+            "person_id": None,
+            "submission_id": None,
+            "draft_id": draft_id,
+            "label": submissions.person_label(entry),
         }
+
+    targets: dict[str, dict[str, Any] | None] = {}
+    rows: list[list[InlineKeyboardButton]] = []
+    first = entries[0]
+    name = first["given_name"]
+
+    if role == submissions.SIBLING:
+        targets["again"] = cursor
+        targets["spouse"] = ref(first)
+        targets["child"] = ref(first)
         rows = [
-            [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
-            [_button(texts.ADD_MORE, CB_CLIMB_NO)],
-            [
-                _button(
-                    texts.REVIEW_SEND.format(count=len(_basket(context))), CB_REVIEW
-                )
-            ],
+            [_button(texts.NEXT_ANOTHER_SIBLING, f"{CB_NEXT}:again:sibling")],
+            [_button(texts.NEXT_SPOUSE_OF.format(name=name), f"{CB_NEXT}:spouse:spouse")],
+            [_button(texts.NEXT_CHILDREN_OF.format(name=name), f"{CB_NEXT}:child:child")],
         ]
-        message = html_escape_module.escape(
-            f"{added}\n\n"
-            + _climb_prompt(target["given_name"], target.get("sex"), mode)
+    elif role == submissions.CHILD:
+        targets["again"] = cursor
+        targets["spouse"] = ref(first)
+        targets["child"] = ref(first)
+        rows = [
+            [_button(texts.NEXT_ANOTHER_CHILD, f"{CB_NEXT}:again:child")],
+            [_button(texts.NEXT_SPOUSE_OF.format(name=name), f"{CB_NEXT}:spouse:spouse")],
+            [_button(texts.NEXT_CHILDREN_OF.format(name=name), f"{CB_NEXT}:child:child")],
+        ]
+    elif role == submissions.SPOUSE:
+        targets["child"] = cursor  # the couple's children hang off the subject
+        targets["parents"] = ref(first)
+        rows = [
+            [_button(texts.NEXT_CHILDREN_OF.format(name=name), f"{CB_NEXT}:child:child")],
+            [_button(texts.NEXT_PARENTS_OF.format(name=name), f"{CB_NEXT}:parents:parents")],
+        ]
+    else:  # a father and mother
+        targets["parents"] = ref(first)
+        targets["sibling"] = ref(first)
+        rows = [
+            [_button(texts.NEXT_PARENTS_OF.format(name=name), f"{CB_NEXT}:parents:parents")],
+            [_button(texts.NEXT_SIBLINGS_OF.format(name=name), f"{CB_NEXT}:sibling:sibling")],
+        ]
+        mother = next(
+            (e for e in entries if e["role"] == submissions.MOTHER), None
         )
-        if len(_basket(context)) % 3 == 0:
-            drawing = await _sketch_of(update, context)
-            if drawing:
-                message = (
-                    html_escape_module.escape(added)
-                    + "\n\nSo far:\n" + drawing + "\n"
-                    + html_escape_module.escape(
-                        _climb_prompt(target["given_name"], target.get("sex"), mode)
+        if mother is not None:
+            targets["parents2"] = ref(mother)
+            rows.append(
+                [
+                    _button(
+                        texts.NEXT_PARENTS_OF.format(name=mother["given_name"]),
+                        f"{CB_NEXT}:parents2:parents",
                     )
-                )
-        await _say(update, message, _kb(rows), html=True)
-        return CLIMB
+                ]
+            )
 
-    return await _show_menu(update, context, added)
+    context.user_data["next_targets"] = targets
+    rows.append([_button(texts.ADD_MORE, f"{CB_NEXT}:menu:menu")])
+    rows.append(
+        [_button(texts.REVIEW_SEND.format(count=len(_basket(context))), CB_REVIEW)]
+    )
 
-
-def _climb_prompt(name: str, sex: str | None, mode: str) -> str:
-    if mode == "parents":
-        return texts.CLIMB_PARENTS.format(name=name)
-    spouse = {"M": "a wife", "F": "a husband"}.get(sex or "", "a wife or husband")
-    return texts.CLIMB_FAMILY.format(name=name, spouse=spouse)
+    message = html_escape_module.escape(f"{added}\n\n{texts.NEXT_PROMPT}")
+    if len(_basket(context)) % 3 == 0:
+        drawing = await _sketch_of(update, context)
+        if drawing:
+            message = (
+                html_escape_module.escape(added)
+                + "\n\nSo far:\n"
+                + drawing
+                + "\n"
+                + html_escape_module.escape(texts.NEXT_PROMPT)
+            )
+    await _say(update, message, _kb(rows), html=True)
+    return CLIMB
 
 
 # ===========================================================================
@@ -631,22 +788,31 @@ async def on_identity_choice(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # redundant by what they already entered is silently passed over.
 # ===========================================================================
 
-#: (step id, "flow" to launch Add-parents / "tell" to invite free text,
-#:  whose corner of the family it is about)
+#: (step id, flow kind to launch, whose corner of the family it is about,
+#:  the "none of those" button label — None when the step cannot be a no)
 _TOUR_STEPS = [
-    ("own_parents", "flow", "self"),
-    ("own_siblings", "tell", "self"),
-    ("own_family", "tell", "self"),
-    ("father_parents", "flow", "father"),
-    ("father_siblings", "tell", "father"),
-    ("mother_parents", "flow", "mother"),
-    ("mother_siblings", "tell", "mother"),
+    ("own_parents", submissions.ADD_PARENTS, "self", None),
+    ("own_siblings", submissions.ADD_SIBLING, "self", "none_siblings"),
+    ("own_spouse", submissions.ADD_SPOUSE, "self", "not_married"),
+    ("own_children", submissions.ADD_CHILD, "self", "no_children"),
+    ("father_parents", submissions.ADD_PARENTS, "father", None),
+    ("father_siblings", submissions.ADD_SIBLING, "father", "none"),
+    ("mother_parents", submissions.ADD_PARENTS, "mother", None),
+    ("mother_siblings", submissions.ADD_SIBLING, "mother", "none"),
 ]
 
-#: What a bare name typed at a "tell" step most likely is.
+_TOUR_NONE_LABELS = {
+    "none_siblings": lambda: texts.TOUR_NONE_SIBLINGS,
+    "not_married": lambda: texts.TOUR_NOT_MARRIED,
+    "no_children": lambda: texts.TOUR_NO_CHILDREN,
+    "none": lambda: texts.TOUR_NONE,
+}
+
+#: What a bare name typed at a tour step most likely is.
 _TOUR_DEFAULT_ROLE = {
     "own_siblings": submissions.SIBLING,
-    "own_family": submissions.SPOUSE,
+    "own_spouse": submissions.SPOUSE,
+    "own_children": submissions.CHILD,
     "father_siblings": submissions.SIBLING,
     "mother_siblings": submissions.SIBLING,
 }
@@ -667,7 +833,7 @@ async def _tour_next(
                 key = "father" if entry["role"] == submissions.FATHER else "mother"
                 parents.setdefault(key, entry["given_name"])
 
-    for step, kind, side in _TOUR_STEPS:
+    for step, flow_kind, side, none_key in _TOUR_STEPS:
         if step in done:
             continue
         if side == "self":
@@ -676,7 +842,12 @@ async def _tour_next(
             ) >= 2:
                 done.append(step)
                 continue
-            return {"step": step, "kind": kind, "cursor": None}
+            return {
+                "step": step,
+                "flow": flow_kind,
+                "cursor": None,
+                "none": none_key,
+            }
 
         name = parents.get(side)
         if not name:
@@ -684,16 +855,17 @@ async def _tour_next(
         found = await _resolve_named_subject(update, context, name)
         if found is None:
             continue
-        if kind == "flow" and len(
+        if flow_kind == submissions.ADD_PARENTS and len(
             await _recorded_parents(context, who, found)
         ) >= 2:
             done.append(step)
             continue
         return {
             "step": step,
-            "kind": kind,
+            "flow": flow_kind,
             "cursor": found,
             "name": name,
+            "none": none_key,
             "sex": "M" if side == "father" else "F",
         }
     return None
@@ -703,7 +875,8 @@ def _tour_prompt(step: dict[str, Any]) -> str:
     return {
         "own_parents": lambda: texts.TOUR_OWN_PARENTS,
         "own_siblings": lambda: texts.TOUR_OWN_SIBLINGS,
-        "own_family": lambda: texts.TOUR_OWN_FAMILY,
+        "own_spouse": lambda: texts.TOUR_OWN_SPOUSE,
+        "own_children": lambda: texts.TOUR_OWN_CHILDREN,
         "father_parents": lambda: texts.tour_grandparents(step["name"]),
         "mother_parents": lambda: texts.tour_grandparents(step["name"]),
         "father_siblings": lambda: texts.tour_parent_siblings(
@@ -735,23 +908,16 @@ async def _offer_tour(
         )
 
     context.user_data["tour_step"] = step["step"]
-    context.user_data["tour_kind"] = step["kind"]
+    context.user_data["tour_flow"] = step["flow"]
     _set_cursor(context, step.get("cursor"))
 
-    if step["kind"] == "flow":
-        first = [_button(texts.TOUR_LETS_GO, f"{CB_TOUR}:go")]
-    else:
-        none_label = (
-            texts.TOUR_NONE_FAMILY
-            if step["step"] == "own_family"
-            else texts.TOUR_NONE_SIBLINGS
+    rows = [[_button(texts.TOUR_LETS_GO, f"{CB_TOUR}:go")]]
+    if step.get("none"):
+        rows.append(
+            [_button(_TOUR_NONE_LABELS[step["none"]](), f"{CB_TOUR}:none")]
         )
-        first = [_button(none_label, f"{CB_TOUR}:none")]
-    rows = [
-        first,
-        [_button(texts.TOUR_SKIP, f"{CB_TOUR}:skip")],
-        [_button(texts.TOUR_MENU, f"{CB_TOUR}:menu")],
-    ]
+    rows.append([_button(texts.TOUR_SKIP, f"{CB_TOUR}:skip")])
+    rows.append([_button(texts.TOUR_MENU, f"{CB_TOUR}:menu")])
     prompt = _tour_prompt(step)
     await _say(update, f"{lead}\n\n{prompt}" if lead else prompt, _kb(rows))
     return TOUR
@@ -778,30 +944,31 @@ async def on_tour_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _tour_mark_done(context)
         return await _offer_tour(update, context)
 
-    # "Let's do it" — the step's flow, pointed at the right person.
+    # "Yes" — the step's own flow, pointed at the right person.
+    flow = flows.BY_KIND.get(
+        context.user_data.get("tour_flow") or "", flows.ADD_PARENTS
+    )
     _tour_mark_done(context)
-    _begin(context, flows.ADD_PARENTS)
-    await _prefill_own_father(update, context, flows.ADD_PARENTS)
+    _begin(context, flow)
+    await _prefill_own_father(update, context, flow)
     return await _ask(update, context)
 
 
 async def on_tour_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typed = update.effective_message.text or ""
     step_id = context.user_data.get("tour_step") or ""
-    kind = context.user_data.get("tour_kind")
+    kind = context.user_data.get("tour_flow")
 
     answer = understand.yes_no(typed)
     if answer is False or understand.is_skip(typed):
         _tour_mark_done(context)
         return await _offer_tour(update, context)
     if answer is True:
-        if kind == "flow":
-            _tour_mark_done(context)
-            _begin(context, flows.ADD_PARENTS)
-            await _prefill_own_father(update, context, flows.ADD_PARENTS)
-            return await _ask(update, context)
-        await _say(update, texts.TOUR_GO_ON)
-        return TOUR
+        flow = flows.BY_KIND.get(kind or "", flows.ADD_PARENTS)
+        _tour_mark_done(context)
+        _begin(context, flow)
+        await _prefill_own_father(update, context, flow)
+        return await _ask(update, context)
 
     # Not a yes or a no — hopefully names. Read them like any dictation,
     # hung off whoever this step is about.
@@ -985,7 +1152,7 @@ async def _send(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
         return await _show_menu(update, context, texts.FIX_SAVED)
     if payload["kind"] == submissions.IDENTIFY:
         return await _show_menu(update, context, texts.SAVED)
-    return await _offer_climb(update, context, payload)
+    return await _offer_tour(update, context, texts.SAVED)
 
 
 # ===========================================================================
@@ -1031,107 +1198,44 @@ async def on_pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ===========================================================================
-# Climbing
+# What next
 # ===========================================================================
 #
-# After a save, offer the obvious next step. This is what walks a contributor
-# up the generations instead of leaving them stranded at their own parents.
+# After a save, concrete named next moves. This is what walks a contributor
+# through a family instead of leaving them stranded at a menu.
 # ===========================================================================
 
 
-async def _offer_climb(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
-    """Suggest moving to the person just added and asking about their parents."""
-    entries = [
-        entry
-        for entry in payload.get("people") or []
-        if entry.get("role") in (submissions.FATHER, submissions.MOTHER,
-                                 submissions.SIBLING, submissions.CHILD,
-                                 submissions.SPOUSE)
-    ]
-    if not entries:
-        return await _show_menu(update, context, texts.SAVED)
-
-    # Prefer the father: the patriline is what carries a branch upward.
-    entries.sort(key=lambda e: 0 if e["role"] == submissions.FATHER else 1)
-    target = entries[0]
-
-    context.user_data["climb_to"] = {
-        "label": submissions.person_label(target),
-        "sex": target.get("sex"),
-    }
-    await _say(
-        update,
-        f"{texts.SAVED}\n\n"
-        + texts.CLIMB_PARENTS.format(name=target["given_name"]),
-        _kb(
-            [
-                [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
-                [_button(texts.CLIMB_NO, CB_CLIMB_NO)],
-            ]
-        ),
-    )
-    return CLIMB
-
-
-async def on_climb_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """"yes", "nah", "ok" — all perfectly good answers to a yes/no question."""
-    answer = understand.yes_no(update.effective_message.text or "")
-    if answer is True:
-        return await _climb_yes(update, context)
-    if answer is False:
-        return await _offer_tour(update, context)
-
-    target = context.user_data.get("climb_to") or {}
-    name = target.get("label", "them").split()[0]
-    await _say(
-        update,
-        _climb_prompt(name, None, target.get("mode", "parents")),
-        _kb(
-            [
-                [_button(texts.CLIMB_YES, CB_CLIMB_YES)],
-                [_button(texts.ADD_MORE, CB_CLIMB_NO)],
-            ]
-        ),
-    )
-    return CLIMB
-
-
-async def on_climb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_next(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    _part, target_key, action = query.data.split(":", 2)
 
-    if query.data == CB_CLIMB_NO:
+    if action == "menu":
         return await _offer_tour(update, context)
 
-    # The person we just named is still in the basket, so point the cursor at
-    # the draft. Send resolves it to a real submission id.
-    target = context.user_data.get("climb_to") or {}
-    if not target:
+    targets = context.user_data.get("next_targets") or {}
+    if target_key != "again" and target_key not in targets:
         return await _show_menu(update, context, texts.ERROR)
+    _set_cursor(context, targets.get(target_key))
 
-    return await _climb_yes(update, context)
-
-
-async def _climb_yes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target = context.user_data.get("climb_to") or {}
-    if not target:
-        return await _show_menu(update, context, texts.ERROR)
-
-    _set_cursor(
-        context,
-        {
-            "person_id": None,
-            "submission_id": None,
-            "draft_id": target.get("draft_id"),
-            "label": target["label"],
-        },
-    )
-    if target.get("mode") == "family":
-        # Their household: the menu, pointed at them, says exactly what can
-        # be added — their spouse, their children.
-        return await _show_menu(update, context)
-    _begin(context, flows.ADD_PARENTS)
+    flow = {
+        "sibling": flows.ADD_SIBLING,
+        "spouse": flows.ADD_SPOUSE,
+        "child": flows.ADD_CHILD,
+        "parents": flows.ADD_PARENTS,
+    }[action]
+    _begin(context, flow)
+    await _prefill_own_father(update, context, flow)
     return await _ask(update, context)
+
+
+async def on_next_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"no", "that's all" — a decline of the panel moves the tour along."""
+    answer = understand.yes_no(update.effective_message.text or "")
+    if answer is False or understand.is_skip(update.effective_message.text or ""):
+        return await _offer_tour(update, context)
+    return await _show_menu(update, context, texts.MENU_TYPE_HINT)
 
 
 # ===========================================================================

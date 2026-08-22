@@ -304,6 +304,28 @@ ADD_PARENTS = Flow(
 )
 
 
+def _build_sibling(answers, submitted_by, about, **_):
+    return submissions.build(
+        submissions.ADD_SIBLING,
+        submitted_by=submitted_by,
+        about=about,
+        people=[
+            submissions.person(
+                submissions.SIBLING,
+                answers["given"],
+                sex=answers.get("sex"),
+                # "No" to same-father names the father; "yes" is stamped by
+                # the handler from what the subject's own record says.
+                father_given_name=answers.get("sibling_father"),
+            )
+        ],
+    )
+
+
+SAME_FATHER_YES = "yes"
+SAME_FATHER_NO = "no"
+SAME_FATHER_UNSURE = "unsure"
+
 ADD_SIBLING = Flow(
     kind=submissions.ADD_SIBLING,
     steps=[
@@ -318,8 +340,29 @@ ADD_SIBLING = Flow(
             NAME,
             lambda a: texts.ASK_SIBLING_GIVEN.format(his_her=_his_her(a)),
         ),
+        # Half-siblings are real, and the answer doubles as evidence for the
+        # duplicate matcher: a shared father is what ties two contributors'
+        # accounts of the same person together.
+        Step(
+            "same_father",
+            CHOICE,
+            lambda a: texts.ask_same_father(_subject(a)),
+            choices=[
+                (texts.YES_WORD, SAME_FATHER_YES),
+                (texts.NO_WORD, SAME_FATHER_NO),
+                (texts.NOT_SURE, SAME_FATHER_UNSURE),
+            ],
+        ),
+        Step(
+            "sibling_father",
+            NAME,
+            lambda a: texts.ASK_SIBLING_FATHER.format(his_her=_his_her(a)),
+            only_if="same_father",
+            only_if_value=SAME_FATHER_NO,
+            optional=True,
+        ),
     ],
-    build=_build_simple(submissions.ADD_SIBLING, submissions.SIBLING),
+    build=_build_sibling,
 )
 
 

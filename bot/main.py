@@ -98,10 +98,17 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 cancel_button,
             ],
             handlers.CLIMB: [
-                CallbackQueryHandler(handlers.on_climb, pattern=r"^climb:"),
+                CallbackQueryHandler(handlers.on_next, pattern=r"^next:"),
                 CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
                 cancel_button,
-                MessageHandler(TEXT_ANSWER, handlers.on_climb_text),
+                MessageHandler(TEXT_ANSWER, handlers.on_next_text),
+            ],
+            handlers.CONFIRM_PERSON: [
+                CallbackQueryHandler(
+                    handlers.on_person_confirmed, pattern=r"^(keep|redo)$"
+                ),
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_person_confirm_text),
             ],
             handlers.TOUR: [
                 CallbackQueryHandler(handlers.on_tour_button, pattern=r"^tour:"),
