@@ -1065,6 +1065,36 @@ def _relational_reasons(
     return reasons
 
 
+def name_sex_hint(conn: sqlite3.Connection, given_name: str) -> str | None:
+    """What this family calls people with this name — "M", "F", or None.
+
+    Learned from the family's own records, never from an outside name list:
+    Hanna is a man here whatever the West thinks. A single disagreement
+    anywhere kills the hint — a guess shown to the wrong person costs more
+    than a question ever does."""
+    target = given_name.strip().casefold()
+    if not target:
+        return None
+    seen: set[str] = set()
+
+    for row in conn.execute(
+        "SELECT sex FROM people WHERE sex IS NOT NULL"
+        " AND lower(given_name) = ?", (target,)
+    ):
+        seen.add(row["sex"])
+
+    for row in conn.execute("SELECT * FROM submissions WHERE status = 'pending'"):
+        payload = submission_payload(row)
+        for entry in payload.get("people") or []:
+            if (
+                entry.get("sex")
+                and (entry.get("given_name") or "").casefold() == target
+            ):
+                seen.add(entry["sex"])
+
+    return seen.pop() if len(seen) == 1 else None
+
+
 def corroborate(
     conn: sqlite3.Connection,
     given_name: str,

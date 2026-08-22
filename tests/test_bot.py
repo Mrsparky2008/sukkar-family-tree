@@ -1082,6 +1082,35 @@ class BrotherOrSisterTests(BotTestCase):
         await chat.say("My kids are Rohnda and Jason")
         self.assertIn("Is Rohnda your son or daughter?", chat.text)
 
+    async def test_the_familys_own_names_shape_the_question(self):
+        """Every Antoun on this tree is a man, so lead with the guess —
+        one confirming tap for the common case, and the Hanna case is
+        still one tap from being put right."""
+        chat = await self.identified_as_khalil()
+        await chat.say("My kids are Antoun and Layla")
+        self.assertIn("Antoun — your son, I'm guessing?", chat.text)
+        await chat.tap("Yes — son")
+        self.assertIn("Layla — your daughter, I'm guessing?", chat.text)
+        await chat.tap("No — son")
+        await chat.tap("Send all")
+
+        entries = [
+            q["payload"]["people"][0]
+            for q in self.queued()
+            if q["payload"]["kind"] == submissions.ADD_CHILD
+        ]
+        self.assertEqual([e["sex"] for e in entries], ["M", "M"])
+
+    def test_a_single_disagreement_kills_the_name_guess(self):
+        conn = db.connect()
+        try:
+            self.assertEqual(db.name_sex_hint(conn, "Antoun"), "M")
+            db.create_person(conn, "Antoun", sex="F")
+            self.assertIsNone(db.name_sex_hint(conn, "Antoun"))
+            self.assertIsNone(db.name_sex_hint(conn, "Somebody-Unheard-Of"))
+        finally:
+            conn.close()
+
 
 class GuidedTourTests(BotTestCase):
     """A new contributor is led through their family, not dropped at a menu."""

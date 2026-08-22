@@ -415,6 +415,15 @@ async def own_parent_names(telegram_user_id: int) -> dict[str, str]:
     return await _run(_own_parent_names, telegram_user_id)
 
 
+def _name_sex_hint(conn: sqlite3.Connection, given_name: str) -> str | None:
+    return db.name_sex_hint(conn, given_name)
+
+
+async def name_sex_hint(given_name: str) -> str | None:
+    """The family's own verdict on a name's sex, if it is unanimous."""
+    return await _run(_name_sex_hint, given_name)
+
+
 def _count_contributions(conn: sqlite3.Connection, telegram_user_id: int) -> int:
     total = 0
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):

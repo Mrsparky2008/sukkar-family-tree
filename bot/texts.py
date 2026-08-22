@@ -226,6 +226,18 @@ def ask_person_sex(name: str, owner: str | None, kind: str) -> str:
     return f"Is {name} {possessive(owner)} {pair}?"
 
 
+def ask_person_sex_guessed(name: str, owner: str | None, kind: str, sex: str) -> str:
+    """When everyone on the tree with this name is one sex, lead with the
+    guess so the common case is a single confirming tap — and the guess is
+    always shown, never silently applied."""
+    word = KIN_WORDS[kind][sex]
+    return f"{name} — {possessive(owner)} {word}, I'm guessing?"
+
+
+GUESS_YES = "Yes — {word}"
+GUESS_NO = "No — {word}"
+
+
 SEX_NOT_UNDERSTOOD = "Just tap one of the buttons, or Skip if you're not sure."
 
 

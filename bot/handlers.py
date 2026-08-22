@@ -1533,6 +1533,11 @@ async def _absorb_dictation(
                         "name": entry["given_name"],
                         "kind": kind,
                         "owner": owner,
+                        # The family's own records often settle it — every
+                        # Toufic on this tree is a man. Lead with the guess,
+                        # but the tap decides; Hanna is a man here whatever
+                        # an outside name list thinks.
+                        "guess": await store.name_sex_hint(entry["given_name"]),
                     }
                 )
 
@@ -1627,17 +1632,26 @@ async def _ask_next_clarify(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return CLARIFY
 
     male_label, female_label = _SEX_BUTTONS[item["kind"]]
-    await _say(
-        update,
-        texts.ask_person_sex(item["name"], item["owner"], item["kind"]),
-        _kb(
-            [
-                [_button(male_label, f"{CB_SEX}:M")],
-                [_button(female_label, f"{CB_SEX}:F")],
-                [_button(texts.SKIP, f"{CB_SEX}:skip")],
-            ]
-        ),
-    )
+    guess = item.get("guess")
+    if guess in ("M", "F"):
+        other = "F" if guess == "M" else "M"
+        labels = {"M": male_label, "F": female_label}
+        question = texts.ask_person_sex_guessed(
+            item["name"], item["owner"], item["kind"], guess
+        )
+        rows = [
+            [_button(texts.GUESS_YES.format(word=labels[guess].lower()), f"{CB_SEX}:{guess}")],
+            [_button(texts.GUESS_NO.format(word=labels[other].lower()), f"{CB_SEX}:{other}")],
+            [_button(texts.SKIP, f"{CB_SEX}:skip")],
+        ]
+    else:
+        question = texts.ask_person_sex(item["name"], item["owner"], item["kind"])
+        rows = [
+            [_button(male_label, f"{CB_SEX}:M")],
+            [_button(female_label, f"{CB_SEX}:F")],
+            [_button(texts.SKIP, f"{CB_SEX}:skip")],
+        ]
+    await _say(update, question, _kb(rows))
     return CLARIFY
 
 
