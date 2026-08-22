@@ -744,6 +744,9 @@ class FixSomethingTests(BotTestCase):
         await chat.tap(texts.MENU_FIX)
         self.assertIn("Ritta", str(chat.buttons))
         await chat.tap("Ritta")
+        # A tap opens the full story first; fixing is a second, deliberate tap.
+        self.assertIn("Status:", chat.text)
+        await chat.tap(texts.FIX_THIS)
         await chat.say("Her name is Rita, one t")
         await chat.tap(texts.SEND_IT)
 
@@ -764,6 +767,7 @@ class FixSomethingTests(BotTestCase):
 
         await chat.tap(texts.MENU_FIX)
         await chat.tap("Sami")
+        await chat.tap(texts.FIX_THIS)
         await chat.say("Actually he is Samir")
         await chat.tap(texts.SEND_IT)
 

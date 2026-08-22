@@ -483,6 +483,9 @@ FIX_SAVED = (
     "nothing changes on the tree until someone's had a look."
 )
 
+FIX_THIS = "Something's wrong — fix it"
+FIX_BACK = "Back to the list"
+
 FIX_STATUS = {
     "pending": "waiting for review",
     "approved": "approved",

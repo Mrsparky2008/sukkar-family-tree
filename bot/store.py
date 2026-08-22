@@ -559,6 +559,7 @@ def _recent_submissions(
                 "id": row["id"],
                 "status": row["status"],
                 "summary": submissions.describe(payload),
+                "details": submissions.detail_lines(payload),
                 "kind": payload.get("kind"),
                 "person_id": row["resulting_person_id"],
             }

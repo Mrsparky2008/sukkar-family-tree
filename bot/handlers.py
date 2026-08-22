@@ -2025,7 +2025,13 @@ def _trim(label: str, limit: int = 60) -> str:
 async def on_pick_submission(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    submission_id = int(query.data.split(":", 1)[1])
+    parts = query.data.split(":")
+
+    if parts[1] == "back":
+        return await _start_correction(update, context)
+
+    fixing = parts[1] == "go"
+    submission_id = int(parts[-1])
 
     chosen = None
     for item in await store.recent_submissions(update.effective_user.id):
@@ -2034,6 +2040,25 @@ async def on_pick_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
             break
     if chosen is None:
         return await _show_menu(update, context, texts.ERROR)
+
+    if not fixing:
+        # The list truncates on a phone; a tap means "let me read it", not
+        # "it's wrong". Show the whole story first — fixing is a second,
+        # deliberate tap.
+        status = texts.FIX_STATUS.get(chosen["status"], chosen["status"])
+        body = "\n".join(chosen["details"]) + f"\n\nStatus: {status}"
+        await _say(
+            update,
+            body,
+            _kb(
+                [
+                    [_button(texts.FIX_THIS, f"{CB_FIX}:go:{submission_id}")],
+                    [_button(texts.FIX_BACK, f"{CB_FIX}:back")],
+                    [_button(texts.BACK_TO_MENU, CB_CANCEL)],
+                ]
+            ),
+        )
+        return PICK_SUBMISSION
 
     _begin(
         context,
