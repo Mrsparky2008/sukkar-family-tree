@@ -42,6 +42,10 @@ ASK_SELF_FATHER_WHY = (
     "Your father's name is how we tell apart the many people who share yours."
 )
 
+ASK_SELF_SEX = "And are you a man or a woman? It's how the tree draws you."
+SELF_MAN = "Man"
+SELF_WOMAN = "Woman"
+
 IDENTITY_GUESS = (
     "I think you might already be on the tree. Is one of these you?"
 )

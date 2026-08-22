@@ -141,6 +141,7 @@ def _build_identify(answers, submitted_by, about, **_):
             submissions.person(
                 submissions.SELF,
                 answers["given"],
+                sex=answers.get("sex"),
                 family_name=family_name_from(answers),
                 father_given_name=answers.get("father_given"),
             )
@@ -271,6 +272,15 @@ IDENTIFY = Flow(
             "father_given",
             NAME,
             f"{texts.ASK_SELF_FATHER}\n\n{texts.ASK_SELF_FATHER_WHY}",
+        ),
+        # The chart places husbands and wives by sex; without this, the
+        # people most certain to be on the tree — the contributors — would
+        # be the ones it cannot draw.
+        Step(
+            "sex",
+            CHOICE,
+            texts.ASK_SELF_SEX,
+            choices=[(texts.SELF_MAN, "M"), (texts.SELF_WOMAN, "F")],
         ),
     ],
     build=_build_identify,

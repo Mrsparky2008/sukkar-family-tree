@@ -78,6 +78,7 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
+        await chat.tap(texts.SELF_MAN)
         await chat.tap("Khalil Youssef")
         return chat
 
@@ -90,6 +91,7 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
         # New signups get the guided tour; these tests drive the menu.
         await chat.tap(texts.TOUR_MENU)
         return chat
@@ -138,6 +140,7 @@ class IdentificationTests(BotTestCase):
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
+        await chat.tap(texts.SELF_MAN)
         self.assertIn("Khalil Youssef Sukkar", str(chat.buttons))
 
     async def test_confirming_a_match_links_the_contributor(self):
@@ -162,6 +165,7 @@ class IdentificationTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fadi")
+        await chat.tap(texts.SELF_MAN)
 
         self.assertEqual(self.people_count(), before, "constraint 4 violated")
         queued = self.queued()
@@ -175,6 +179,7 @@ class IdentificationTests(BotTestCase):
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Youssef")
+        await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.IDENTITY_NONE_OF_THESE)
 
         queued = self.queued()
@@ -195,6 +200,7 @@ class IdentificationTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fadi")
+        await chat.tap(texts.SELF_MAN)
 
         again = Conversation(user_id=5004)
         await again.start()
@@ -225,6 +231,7 @@ class FamilyNameTests(BotTestCase):
         await chat.say("Steven")
         await chat.tap("Succar")
         await chat.say("Kalim")
+        await chat.tap(texts.SELF_MAN)
 
         entry = self.queued()[0]["payload"]["people"][0]
         self.assertEqual(entry["family_name"], "Succar")
@@ -237,6 +244,7 @@ class FamilyNameTests(BotTestCase):
         self.assertIn(texts.ASK_FAMILY_OTHER, chat.text)
         await chat.say("Soukar")
         await chat.say("Kalim")
+        await chat.tap(texts.SELF_MAN)
 
         entry = self.queued()[0]["payload"]["people"][0]
         self.assertEqual(entry["family_name"], "Soukar")
@@ -266,6 +274,7 @@ class FamilyNameTests(BotTestCase):
         await chat.tap(texts.FAMILY_OTHER)
         await chat.say("Soukar")
         await chat.say("Kalim")
+        await chat.tap(texts.SELF_MAN)
 
         conn = db.connect()
         try:
@@ -432,6 +441,7 @@ class AddParentsTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")             # own father: always known, now required
+        await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_MENU)
         await chat.tap(texts.MENU_ADD_PARENTS)
         # father pre-filled from signup; only the mother is asked
@@ -457,6 +467,7 @@ class AddParentsTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_MENU)
         before = len(self.queued())
         # Point the cursor at their own pending record: no pre-filled father
@@ -885,6 +896,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.say("Steven.")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Kalim,")
+        await chat.tap(texts.SELF_MAN)
 
         entry = self.queued()[0]["payload"]["people"][0]
         self.assertEqual(entry["given_name"], "Steven")
@@ -896,6 +908,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.say("Abou-Khalil")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
         self.assertEqual(
             self.queued()[0]["payload"]["people"][0]["given_name"], "Abou-Khalil"
         )
@@ -907,6 +920,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.say("Steven")
         await chat.say("Su K ar")
         await chat.say("Kalim")
+        await chat.tap(texts.SELF_MAN)
         self.assertEqual(
             self.queued()[0]["payload"]["people"][0]["family_name"], "Sukar"
         )
@@ -1078,6 +1092,7 @@ class GuidedTourTests(BotTestCase):
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
         await chat.say("Fares")
+        await chat.tap(texts.SELF_MAN)
         return chat
 
     async def test_a_new_signup_is_led_not_dropped_at_a_menu(self):
@@ -1196,6 +1211,7 @@ class LinkQuestionTests(BotTestCase):
         await second.say("Georges")
         await second.tap(config.FAMILY_NAME)
         await second.say("Youssef")
+        await second.tap(texts.SELF_MAN)
         await second.tap("Georges Youssef")
         await second.tap(texts.MENU_SWITCH)
         await second.tap("Khalil Youssef")
@@ -1218,6 +1234,7 @@ class LinkQuestionTests(BotTestCase):
         await first.say("Steven")
         await first.tap(config.FAMILY_NAME)
         await first.say("Kalim")
+        await first.tap(texts.SELF_MAN)
         await first.say("My brother Joseph and sister Nawal")
         await first.tap("Send all")
 
@@ -1226,6 +1243,7 @@ class LinkQuestionTests(BotTestCase):
         await second.say("Nawal")
         await second.tap(config.FAMILY_NAME)
         await second.say("Kalim")
+        await second.tap(texts.SELF_WOMAN)
         await second.say("My brothers Steven and Joseph")
 
         self.assertIn("Is this the same person as Steven", second.text)
