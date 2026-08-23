@@ -57,6 +57,17 @@ IDENTITY_GUESS = (
 
 IDENTITY_NONE_OF_THESE = "None of these are me"
 
+#: Appended to the guess when the tree is published: answer by looking,
+#: not from memory. A wrong "none of these" makes a duplicate person.
+IDENTITY_GUESS_LOOK = (
+    "\n\nNot sure? Tap the tree button under a name to look at them — "
+    "their parents and family are right there."
+)
+
+
+def check_on_tree(person_id: int) -> str:
+    return f"🌳 Look at #{person_id} on the tree"
+
 IDENTITY_CONFIRMED = "Good to meet you, {name}."
 
 IDENTITY_QUEUED = (

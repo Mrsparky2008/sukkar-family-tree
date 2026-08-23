@@ -859,6 +859,30 @@ class SystemReviewerTests(BotTestCase):
         self.assertEqual(self.queued()[-1]["status"], "pending")
 
 
+class IdentityCheckTests(BotTestCase):
+    """"Is one of these you?" answered by looking, not guessing."""
+
+    async def test_the_guess_carries_the_number_and_a_look_button(self):
+        original = config.PUBLIC_URL
+        config.PUBLIC_URL = "https://example.test/tree.html"
+        try:
+            chat = Conversation(user_id=5700)
+            await chat.start()
+            await chat.say("Khalil")
+            await chat.tap(config.FAMILY_NAME)
+            await chat.say("Youssef")
+            await chat.tap(texts.SELF_MAN)
+            self.assertIn(texts.IDENTITY_GUESS, chat.text)
+            khalil = self.ids["khalil_y"]
+            self.assertTrue(
+                any(f"(#{khalil})" in label for label in chat.buttons),
+                list(chat.buttons),
+            )
+            self.assertIn(texts.check_on_tree(khalil), chat.buttons)
+        finally:
+            config.PUBLIC_URL = original
+
+
 class TreeLinkButtonTests(BotTestCase):
     """The whole tree, one tap from the end of every menu — once published."""
 

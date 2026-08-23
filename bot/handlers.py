@@ -888,12 +888,29 @@ async def _offer_identity_matches(
         return await _queue_identity(update, context, payload)
 
     _state(context)["candidates"] = candidates
-    rows = [
-        [_button(candidate["label"], f"{CB_IDENTITY}:{candidate['person_id']}")]
-        for candidate in candidates
-    ]
+    rows = []
+    for candidate in candidates:
+        rows.append(
+            [_button(
+                texts.tagged(candidate["label"], candidate["person_id"]),
+                f"{CB_IDENTITY}:{candidate['person_id']}",
+            )]
+        )
+        # A wrong "no" here creates a duplicate person and a mess to
+        # unpick. Give them the means to check before they answer: the
+        # tree, opened right on the person in question.
+        if config.PUBLIC_URL:
+            rows.append(
+                [InlineKeyboardButton(
+                    texts.check_on_tree(candidate["person_id"]),
+                    url=f"{config.PUBLIC_URL}#p{candidate['person_id']}",
+                )]
+            )
     rows.append([_button(texts.IDENTITY_NONE_OF_THESE, CB_NOBODY)])
-    await _say(update, texts.IDENTITY_GUESS, _kb(rows))
+    question = texts.IDENTITY_GUESS
+    if config.PUBLIC_URL:
+        question += texts.IDENTITY_GUESS_LOOK
+    await _say(update, question, _kb(rows))
     return IDENTITY_MATCH
 
 

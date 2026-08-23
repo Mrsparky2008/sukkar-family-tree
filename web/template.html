@@ -845,4 +845,21 @@ document.getElementById("tally").textContent =
 window.addEventListener("resize", resize);
 resize();
 fit();
+
+// Deep link: opening the page as ...tree.html#p34 lands centred on person
+// #34 with their panel open. The bot links here at sign-in — "is that
+// Louisa you?" is answerable by looking, not guessing.
+(function openFromHash() {
+  const match = (location.hash || "").match(/^#p?(\d+)$/);
+  if (!match) return;
+  const id = Number(match[1]);
+  const pl = PLACEMENTS.find(p => p.id === id);
+  if (!pl) return;
+  const box = canvas.getBoundingClientRect();
+  view.k = Math.max(view.k, 0.9);
+  view.x = box.width / 2 - pl.x * view.k;
+  view.y = box.height / 2 - pl.y * view.k;
+  show(id);
+  draw();
+})();
 </script>
