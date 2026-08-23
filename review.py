@@ -66,6 +66,30 @@ def resolve_subject(conn: sqlite3.Connection, payload: dict[str, Any]) -> int | 
                 if (person["given_name"] or "").casefold() == first:
                     return int(person["id"])
 
+            # A parents-pair merged into people already on the tree creates
+            # nobody, so the label cannot match a created row — but the pair
+            # still stands. Find the one the label means through the parent
+            # submission's own subject: the mother is that subject's mother.
+            # Without this, "Wadiha's parents" quietly resolves to her
+            # husband, and her parents become his.
+            parent_payload = db.submission_payload(parent)
+            if parent_payload.get("kind") == submissions.ADD_PARENTS:
+                for entry in parent_payload.get("people") or []:
+                    if (entry.get("given_name") or "").casefold() != first:
+                        continue
+                    grand_subject = resolve_subject(conn, parent_payload)
+                    if grand_subject is None:
+                        break
+                    subject_row = db.get_person(conn, grand_subject)
+                    column = (
+                        "father_id"
+                        if entry.get("role") == submissions.FATHER
+                        else "mother_id"
+                    )
+                    if subject_row and subject_row[column]:
+                        return int(subject_row[column])
+                    break
+
         if parent["resulting_person_id"]:
             return int(parent["resulting_person_id"])
         raise Blocked(
@@ -200,6 +224,19 @@ def approve(
                 links["father_id"] = father_id
             if mother_id:
                 links["mother_id"] = mother_id
+            # A parent link already on the record was put there by a reviewed
+            # decision. Replacing it must be said out loud, not slipped in.
+            subject = db.get_person(conn, subject_id)
+            for column in list(links):
+                standing = subject[column]
+                if standing and standing != links[column] and not force:
+                    side = "father" if column == "father_id" else "mother"
+                    raise Blocked(
+                        f"{db.row_display_name(subject)} already has a "
+                        f"{side} on the tree (#{standing}) — approving this "
+                        f"would replace them. If that is really the fix: "
+                        f"--approve {submission_id} --anyway"
+                    )
             db.update_person(conn, subject_id, **links)
             if father_id and mother_id:
                 db.create_union(conn, father_id, mother_id)

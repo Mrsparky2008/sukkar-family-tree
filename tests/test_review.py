@@ -616,6 +616,81 @@ class AnchorTests(ReviewTestCase):
         )
         self.assertIsNone(tanios["father_id"], "the father inherited her parents")
 
+    def test_an_anchor_through_a_merged_pair_still_finds_the_mother(self):
+        # The couple is already on the tree, and the child is linked to them.
+        tanios = db.create_person(self.conn, "Tanios", sex="M")
+        zeina = db.create_person(self.conn, "Zeina", sex="F")
+        child = db.create_person(
+            self.conn, "Sami", sex="M", father_id=tanios, mother_id=zeina
+        )
+
+        # A second contributor sends the same pair. The reviewer merges it:
+        # nothing is created, the claim is kept as corroboration.
+        duplicate = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Tanios", sex="M"),
+                S.person(S.MOTHER, "Zeina", sex="F"),
+            ],
+            S.subject(person_id=child, label="Sami"),
+        )
+        db.resolve_submission(
+            self.conn, duplicate, "merged", 1, resulting_person_id=tanios
+        )
+
+        # The same contributor continues: "Zeina's parents are Semaan and
+        # Rima" — anchored to their own merged submission, naming the mother.
+        second = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Semaan", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+            S.subject(submission_id=duplicate, label="Zeina"),
+        )
+        review.approve(self.conn, second, reviewed_by=1, force=True)
+
+        zeina_row = db.get_person(self.conn, zeina)
+        tanios_row = db.get_person(self.conn, tanios)
+        self.assertEqual(
+            db.get_person(self.conn, zeina_row["father_id"])["given_name"],
+            "Semaan",
+        )
+        self.assertIsNone(
+            tanios_row["father_id"], "her parents landed on her husband"
+        )
+
+    def test_replacing_a_recorded_parent_must_be_said_out_loud(self):
+        tanios = db.create_person(self.conn, "Tanios", sex="M")
+        child = db.create_person(self.conn, "Sami", sex="M", father_id=tanios)
+
+        sid = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Semaan", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+            S.subject(person_id=child, label="Sami"),
+        )
+        self.conn.commit()
+        with self.assertRaises(review.Blocked):
+            review.approve(self.conn, sid, reviewed_by=1)
+
+        # Nothing was half-applied by the refused attempt.
+        self.assertEqual(
+            db.get_person(self.conn, child)["father_id"], tanios
+        )
+        self.assertEqual(
+            db.get_submission(self.conn, sid)["status"], "pending"
+        )
+
+        # Saying it deliberately replaces the link.
+        review.approve(self.conn, sid, reviewed_by=1, force=True)
+        new_father = db.get_person(self.conn, child)["father_id"]
+        self.assertEqual(
+            db.get_person(self.conn, new_father)["given_name"], "Semaan"
+        )
+
     def test_a_mothers_maiden_name_is_not_a_variant_of_her_husbands(self):
         child = db.create_person(self.conn, "Sami", sex="M")
         sid = self.queue(
