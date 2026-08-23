@@ -272,13 +272,23 @@ SELF_MISREAD = (
     "you mean: \"{name} son of Tony married...\""
 )
 
-#: How a match reads inside the question.
-MATCH_PENDING_SUFFIX = " (added recently, waiting for review)"
+#: How a match reads inside the question. "Waiting for review" meant nothing
+#: to first-timers — they don't know there's a review. Say who and why.
+MATCH_PENDING_SUFFIX = " (someone in the family added them recently)"
+
+
+#: The same-father question startles people who don't know why it's asked —
+#: it can read as the bot doubting their family. Saying the reason out loud
+#: ("I ask everyone") turns it from an accusation into a formality.
+_SAME_FATHER_WHY = (
+    "I ask everyone — some brothers and sisters share just the one parent, "
+    "and the tree has to draw the line to the right father."
+)
 
 
 def ask_same_father(subject: str | None) -> str:
     whose = "you" if not subject else subject
-    return f"Same father as {whose}?"
+    return f"Same father as {whose}?\n\n({_SAME_FATHER_WHY})"
 
 
 YES_WORD = "Yes"
@@ -409,7 +419,7 @@ def counted_name(subject: str | None, position: int, kin: str) -> str:
 def ask_same_father_all(subject: str | None, count: int) -> str:
     whose = "you" if not subject else subject
     lead = "Same father as" if count == 1 else "All the same father as"
-    return f"{lead} {whose}?"
+    return f"{lead} {whose}?\n\n({_SAME_FATHER_WHY})"
 
 
 COUNTED_NONE_NOTED = "Righto — noted."

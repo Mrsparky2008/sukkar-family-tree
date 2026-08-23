@@ -1410,7 +1410,7 @@ class LinkQuestionTests(BotTestCase):
         await second.say("His brother is Tanios")
 
         self.assertIn("Is this the same person as Tanios", second.text)
-        self.assertIn("waiting for review", second.text)
+        self.assertIn(texts.MATCH_PENDING_SUFFIX.strip(), second.text)
         await second.tap(texts.SAME_PERSON)
         await second.tap("Send all")
 
@@ -1439,7 +1439,7 @@ class LinkQuestionTests(BotTestCase):
         await second.say("My brothers Steven and Joseph")
 
         self.assertIn("Is this the same person as Steven", second.text)
-        self.assertIn("waiting for review", second.text)
+        self.assertIn(texts.MATCH_PENDING_SUFFIX.strip(), second.text)
         await second.tap(texts.SAME_PERSON)
         self.assertIn("Is this the same person as Joseph", second.text)
         await second.tap(texts.SAME_PERSON)
