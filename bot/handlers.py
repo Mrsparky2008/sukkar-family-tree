@@ -394,7 +394,16 @@ def _menu_keyboard(
     rows.append([_button(texts.MENU_SWITCH, CB_SWITCH)])
     rows.append([_button(texts.MENU_FIX, f"{CB_MENU}:{submissions.CORRECTION}")])
     rows.append([_button(texts.MENU_VIEW, f"{CB_MENU}:view")])
+    rows.extend(_tree_link_row())
     return _kb(rows)
+
+
+def _tree_link_row() -> list[list[InlineKeyboardButton]]:
+    """The whole tree at the end of every menu — a link button, so one tap
+    opens it straight in the browser. Absent until the tree is published."""
+    if not config.PUBLIC_URL:
+        return []
+    return [[InlineKeyboardButton(texts.SEE_TREE, url=config.PUBLIC_URL)]]
 
 
 async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: str | None = None):
@@ -825,6 +834,7 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
     rows.append(
         [_button(texts.REVIEW_SEND.format(count=len(_basket(context))), CB_REVIEW)]
     )
+    rows.extend(_tree_link_row())
 
     message = html_escape_module.escape(f"{added}\n\n{texts.NEXT_PROMPT}")
     if len(_basket(context)) % 3 == 0:

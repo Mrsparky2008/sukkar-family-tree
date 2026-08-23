@@ -804,6 +804,29 @@ class NumberedNamesTests(BotTestCase):
         self.assertIn(f"(#{boutros})", chat.text)
 
 
+class TreeLinkButtonTests(BotTestCase):
+    """The whole tree, one tap from the end of every menu — once published."""
+
+    async def test_the_menu_ends_with_the_tree_once_published(self):
+        original = config.PUBLIC_URL
+        config.PUBLIC_URL = "https://example.test/tree.html"
+        try:
+            chat = await self.identified_as_khalil()
+            self.assertIn(texts.SEE_TREE, chat.buttons)
+            self.assertEqual(list(chat.buttons)[-1], texts.SEE_TREE)
+        finally:
+            config.PUBLIC_URL = original
+
+    async def test_unpublished_means_no_dead_link(self):
+        original = config.PUBLIC_URL
+        config.PUBLIC_URL = ""
+        try:
+            chat = await self.identified_as_khalil()
+            self.assertNotIn(texts.SEE_TREE, chat.buttons)
+        finally:
+            config.PUBLIC_URL = original
+
+
 class PhoneReviewTests(BotTestCase):
     """/review — approving from a phone, super admins only."""
 

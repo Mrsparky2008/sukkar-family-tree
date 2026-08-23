@@ -176,6 +176,9 @@ MENU_ADD_SPOUSE = "Add a spouse"
 MENU_ADD_CHILD = "Add a child"
 MENU_FIX = "Fix something I submitted"
 MENU_VIEW = "See my corner of the tree"
+#: A plain link button at the end of every menu: the whole tree, one tap,
+#: straight into the browser. Only shown once the tree is published.
+SEE_TREE = "🌳 See the whole tree"
 
 
 # --- following the cursor --------------------------------------------------
