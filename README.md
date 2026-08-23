@@ -42,6 +42,14 @@ father link corrects every name derived from it — it cannot drift.
 Every submission, *including every correction*, lands in `submissions` and waits
 for an admin. No exceptions.
 
+**5. Names are for humans; numbers are the reference.**
+Every approved person keeps one permanent number (`#12`) that never changes —
+not for a respelling, a married name, or any other correction. The bot shows
+the number beside the name wherever it talks about a tree person, so the
+family learns the numbers by seeing them. Corrections can name people by
+number, and when a bare name could mean more than one person, the bot asks
+for the number instead of guessing.
+
 ---
 
 ## Getting started

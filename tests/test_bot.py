@@ -737,11 +737,80 @@ class DuplicateFlaggingTests(BotTestCase):
 # ===========================================================================
 
 
-class FixSomethingTests(BotTestCase):
-    async def test_nothing_to_fix_yet(self):
+class TreeCorrectionTests(BotTestCase):
+    """Names are for humans; the numbers are the permanent reference."""
+
+    async def start_tree_fix(self) -> Conversation:
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_FIX)
-        self.assertIn(texts.FIX_NOTHING_YET, chat.transcript())
+        await chat.tap(texts.FIX_TREE)
+        return chat
+
+    async def test_a_correction_by_number_names_its_people_back(self):
+        khalil = self.ids["khalil_y"]
+        chat = await self.start_tree_fix()
+        await chat.say(f"#{khalil} is spelled Khaleel")
+
+        # Numbers in, names AND numbers out — confirmed before it sends.
+        self.assertIn(f"(#{khalil})", chat.text)
+        await chat.tap(texts.SEND_IT)
+
+        record = self.queued()[-1]
+        self.assertEqual(record["payload"]["kind"], submissions.CORRECTION)
+        self.assertEqual(record["payload"]["target_person_id"], khalil)
+
+    async def test_an_unknown_number_is_bounced_back(self):
+        chat = await self.start_tree_fix()
+        await chat.say("#9999 has the wrong wife")
+        self.assertIn("#9999", chat.text)
+        self.assertNotIn(texts.SEND_IT, chat.buttons)
+
+    async def test_a_shared_name_asks_for_the_number(self):
+        # The seed holds two Khalils — the name alone settles nothing.
+        chat = await self.start_tree_fix()
+        await chat.say("Khalil is not married to Nada")
+
+        self.assertIn("more than one Khalil", chat.text)
+        self.assertIn(f"(#{self.ids['khalil_y']})", chat.text)
+        self.assertIn(f"(#{self.ids['khalil_a']})", chat.text)
+
+        # Sending it again with the number settles it.
+        await chat.say(f"#{self.ids['khalil_a']} is not married to Nada")
+        self.assertIn(texts.SEND_IT, chat.buttons)
+
+    async def test_a_unique_name_resolves_without_being_asked(self):
+        antoun = self.ids["antoun"]
+        chat = await self.start_tree_fix()
+        await chat.say("Antoun died in the village")
+        self.assertIn(f"(#{antoun})", chat.text)
+        await chat.tap(texts.SEND_IT)
+        self.assertEqual(self.queued()[-1]["payload"]["target_person_id"], antoun)
+
+
+class NumberedNamesTests(BotTestCase):
+    """The bot shows the permanent number wherever it names a tree person,
+    so the family learns the numbers by osmosis."""
+
+    async def test_the_picker_and_the_questions_carry_the_number(self):
+        boutros = self.ids["boutros"]
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        # The picker buttons already carry numbers — tap the uncle by his.
+        await chat.tap(f"(#{boutros})")
+        self.assertIn(f"(#{boutros})", chat.text)
+
+        # And the questions about him keep saying it.
+        await chat.tap("brother or sister of")
+        self.assertIn(f"(#{boutros})", chat.text)
+
+
+class FixSomethingTests(BotTestCase):
+    async def test_with_nothing_sent_the_tree_is_still_fixable(self):
+        # No dead end: the tree itself can always be corrected, even by
+        # somebody who has sent nothing of their own yet.
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        self.assertIn(texts.FIX_TREE, chat.buttons)
 
     async def test_correction_goes_to_the_queue_as_a_suggestion(self):
         chat = await self.identified_as_khalil()

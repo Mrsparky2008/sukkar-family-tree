@@ -356,6 +356,34 @@ async def person_parents(person_id: int) -> list[str]:
     return await _run(_person_parents, person_id)
 
 
+def _person_display(conn: sqlite3.Connection, person_id: int) -> str | None:
+    row = db.get_person(conn, person_id)
+    return db.display_name_with_also_known_as(row) if row else None
+
+
+async def person_display(person_id: int) -> str | None:
+    """The full computed name, or None when no such number exists."""
+    return await _run(_person_display, person_id)
+
+
+def _people_named(conn: sqlite3.Connection, given: str) -> list[dict[str, Any]]:
+    wanted = given.casefold()
+    return [
+        {
+            "person_id": row["id"],
+            "label": db.display_name_with_also_known_as(row),
+        }
+        for row in db.get_people(conn)
+        if (row["given_name"] or "").casefold() == wanted
+    ]
+
+
+async def people_named(given: str) -> list[dict[str, Any]]:
+    """Everyone on the tree answering to this first name — the same-name
+    problem, measured. Two or more means only a number settles it."""
+    return await _run(_people_named, given)
+
+
 def _resolved_person_id(conn: sqlite3.Connection, ref: dict[str, Any]) -> int | None:
     import review
 

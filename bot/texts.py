@@ -190,6 +190,17 @@ def possessive(subject: str | None) -> str:
     return "your" if not subject else f"{subject}'s"
 
 
+def tagged(label: str | None, person_id: int | None) -> str | None:
+    """"Toufic (#29)" — the name for the human, the number for the record.
+
+    Names are for humans; the number is the permanent reference. Shown
+    together wherever the bot talks about somebody already on the tree, so
+    the family learns the numbers by seeing them, never by being taught."""
+    if not label or not person_id or "(#" in label:
+        return label
+    return f"{label} (#{person_id})"
+
+
 def menu_labels(subject: str | None) -> dict[str, str]:
     if not subject:
         return {
@@ -545,17 +556,48 @@ ASK_CHILD_GIVEN = "What's {his_her} first name?"
 
 # --- fix something ---------------------------------------------------------
 
-FIX_NOTHING_YET = (
-    "You haven't sent anything yet, so there's nothing to fix.\n\n"
-    "Add someone first and it'll show up here."
-)
-
 FIX_PICK = "Which one needs fixing?"
 
 FIX_ASK_NOTE = (
     "What should it say instead?\n\n"
     "Write it however you like — a person reads these."
 )
+
+#: Corrections about anyone on the tree, not just what this contributor
+#: sent. The numbers are what make it safe: half the family shares a
+#: handful of names, and #12 can only ever mean one man.
+FIX_TREE = "Something on the tree"
+
+FIX_TREE_ASK = (
+    "Tell me what's wrong, in your own words — a person reads these, and "
+    "nothing changes until they've checked it.\n\n"
+    "Use the numbers beside the names when you can, so two people with "
+    "the same name never get mixed up:\n"
+    "    remove the marriage between #12 and #15\n"
+    "    #46 is spelled Marie, not Mary"
+)
+
+
+def fix_tree_about(people: str) -> str:
+    return f"That's about: {people}."
+
+
+def fix_id_unknown(number: str) -> str:
+    return (
+        f"There's nobody numbered #{number} on the tree — worth checking "
+        f"it against the chart. Send the correction again with the right "
+        f"number."
+    )
+
+
+def ask_person_id(name: str, options: str) -> str:
+    """More than one person answers to this name; only a number settles it."""
+    return (
+        f"There's more than one {name} on the tree, so the name alone "
+        f"could mean either of them:\n\n{options}\n\n"
+        f"Can you send the correction again with the person's number in "
+        f"it? You'll find it beside their name in the family tree."
+    )
 
 FIX_SAVED = (
     "Passed on. Corrections get the same once-over as anything else, so "

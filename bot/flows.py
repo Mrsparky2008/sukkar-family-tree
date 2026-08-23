@@ -412,7 +412,16 @@ ADD_CHILD = Flow(
 
 CORRECTION = Flow(
     kind=submissions.CORRECTION,
-    steps=[Step("note", TEXT, texts.FIX_ASK_NOTE)],
+    steps=[
+        # The prompt shifts with the entrance: fixing your own submission
+        # asks what it should say; fixing the tree at large teaches the
+        # numbers, because out there the same name means several people.
+        Step(
+            "note",
+            TEXT,
+            lambda a: texts.FIX_TREE_ASK if a.get("_tree_fix") else texts.FIX_ASK_NOTE,
+        ),
+    ],
     build=_build_correction,
 )
 

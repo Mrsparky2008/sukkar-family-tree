@@ -204,7 +204,9 @@ async def _subject_of(update: Update, context: ContextTypes.DEFAULT_TYPE) -> dic
 
 def _subject_name(context: ContextTypes.DEFAULT_TYPE) -> str:
     cursor = _cursor(context)
-    return cursor["label"] if cursor else texts.SUBJECT_YOU
+    if cursor is None:
+        return texts.SUBJECT_YOU
+    return texts.tagged(cursor["label"], cursor.get("person_id"))
 
 
 #: Payload role -> the kin table's (kind, fixed sex). Parents carry their sex
@@ -396,7 +398,13 @@ def _menu_keyboard(
 async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: str | None = None):
     _reset(context)
     cursor = _cursor(context)
-    name = cursor["label"] if cursor else None
+    # A cursor that pointed at a submission may mean a numbered person by
+    # now. Upgrading it here puts the number on everything downstream.
+    if cursor and not cursor.get("person_id"):
+        found = await store.resolved_person_id(cursor)
+        if found:
+            cursor["person_id"] = found
+    name = texts.tagged(cursor["label"], cursor.get("person_id")) if cursor else None
 
     who = await store.contributor_state(update.effective_user.id)
     relation = (
@@ -454,7 +462,12 @@ async def _ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = _state(context)
     cursor = _cursor(context)
     if flows.SUBJECT_KEY not in state["answers"]:
-        state["answers"][flows.SUBJECT_KEY] = cursor["label"] if cursor else None
+        # The prompt-facing name carries the permanent number; the payload's
+        # subject label stays bare — numbers are for humans to read here,
+        # never something the matcher has to strip back off.
+        state["answers"][flows.SUBJECT_KEY] = (
+            _subject_name(context) if cursor else None
+        )
 
     flow, step = _current(context)
 
@@ -474,11 +487,68 @@ async def _ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ASK
 
 
+async def _resolve_tree_correction(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, state: dict[str, Any]
+):
+    """Pin a tree correction to the people it means, by their numbers.
+
+    "#29" can only ever mean one man; a bare "Toufic" can mean several.
+    Numbers in the text are checked against the tree; without numbers, any
+    name that several people answer to gets the question back — with the
+    candidates and their numbers, so answering is a copy-paste."""
+    note = state["answers"].get("note") or ""
+    people: list[tuple[int, str]] = []
+
+    def again():
+        state["answers"].pop("note", None)
+        state["index"] = 0
+
+    numbers = list(dict.fromkeys(re.findall(r"#\s*(\d+)", note)))
+    for number in numbers:
+        label = await store.person_display(int(number))
+        if label is None:
+            again()
+            await _say(update, texts.fix_id_unknown(number))
+            return ASK
+        people.append((int(number), label))
+
+    if not numbers:
+        for word in list(dict.fromkeys(re.findall(r"[^\W\d_]{3,}", note)))[:20]:
+            found = await store.people_named(word)
+            if len(found) > 1:
+                options = "\n".join(
+                    texts.tagged(item["label"], item["person_id"])
+                    for item in found
+                )
+                again()
+                await _say(
+                    update, texts.ask_person_id(word.capitalize(), options)
+                )
+                return ASK
+            if len(found) == 1:
+                people.append(
+                    (found[0]["person_id"], found[0]["label"])
+                )
+
+    if people:
+        state["extra"]["target_person_id"] = people[0][0]
+        state["extra"]["target_label"] = people[0][1]
+        state["answers"]["_about_people"] = ", ".join(
+            texts.tagged(label, pid) for pid, label in people
+        )
+    return None
+
+
 async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: flows.Flow):
     """All questions answered: build the payload and ask for a final yes."""
     state = _state(context)
     user_id = update.effective_user.id
     who = await store.contributor_state(user_id)
+
+    if flow.kind == submissions.CORRECTION and state["answers"].get("_tree_fix"):
+        outcome = await _resolve_tree_correction(update, context, state)
+        if outcome is not None:
+            return outcome
 
     # Identification is always about the contributor; everything else follows
     # the cursor, which is how they climb past their own parents.
@@ -513,9 +583,15 @@ async def _complete(update: Update, context: ContextTypes.DEFAULT_TYPE, flow: fl
     if flow.kind == submissions.CORRECTION:
         # A correction is one thing about one thing; batching it would be odd.
         lines = "\n".join(submissions.detail_lines(payload))
+        body = f"{texts.CONFIRM_SUBMISSION}\n\n{lines}"
+        # An important change deserves its subjects named back in full
+        # before anything is sent — numbers in, names and numbers out.
+        about_people = state["answers"].get("_about_people")
+        if about_people:
+            body = f"{texts.fix_tree_about(about_people)}\n\n{body}"
         await _say(
             update,
-            f"{texts.CONFIRM_SUBMISSION}\n\n{lines}",
+            body,
             _kb(
                 [
                     [_button(texts.SEND_IT, CB_SEND)],
@@ -1132,7 +1208,11 @@ async def _start_counted(
     context.user_data["counted"] = {
         "role": role,
         "about": await _subject_of(update, context),
-        "subject": cursor["label"].split()[0] if cursor else None,
+        "subject": (
+            texts.tagged(cursor["label"].split()[0], cursor.get("person_id"))
+            if cursor
+            else None
+        ),
         "counts": {},
         "names": [],
         "same_father": None,
@@ -1464,8 +1544,14 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Somebody who already knows will type the whole family in one go. The
     # question asked for one name, but refusing the answer loses the person
-    # worth listening to most.
-    if step.type in (flows.NAME, flows.TEXT) and dictation.looks_like_dictation(typed):
+    # worth listening to most. A correction is the one exception: "remove
+    # the marriage between #12 and #15" is a note about people, never a
+    # batch of new ones.
+    if (
+        step.type in (flows.NAME, flows.TEXT)
+        and state["kind"] != submissions.CORRECTION
+        and dictation.looks_like_dictation(typed)
+    ):
         reading = dictation.parse(
             typed,
             default_role=flows.default_role(_state(context)["kind"], step.id),
@@ -1608,7 +1694,9 @@ async def _pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["subject_choices"] = candidates
     rows = []
     for index, candidate in enumerate(candidates):
-        label = candidate["label"]
+        # Buttons carry the number; the stored choice keeps the bare label,
+        # which is what every matcher downstream works on.
+        label = texts.tagged(candidate["label"], candidate.get("person_id"))
         if candidate.get("note"):
             label = f"{label} ({candidate['note']})"
         rows.append([_button(_trim(label), f"{CB_SUBJECT}:{index}")])
@@ -1629,7 +1717,11 @@ async def on_pick_subject(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chosen = choices[index]
     _set_cursor(context, None if chosen.get("note") == "you" else chosen)
     return await _show_menu(
-        update, context, texts.SWITCHED.format(name=chosen["label"])
+        update,
+        context,
+        texts.SWITCHED.format(
+            name=texts.tagged(chosen["label"], chosen.get("person_id"))
+        ),
     )
 
 
@@ -2570,10 +2662,16 @@ async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def _start_correction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mine = await store.recent_submissions(update.effective_user.id)
-    if not mine:
-        return await _show_menu(update, context, texts.FIX_NOTHING_YET)
 
-    rows = []
+    # Anything on the tree can be corrected, not just what this contributor
+    # sent — a niece spots her grandfather's wrong marriage even though an
+    # uncle entered it.
+    rows = [[_button(texts.FIX_TREE, f"{CB_FIX}:tree")]]
+    if not mine:
+        rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
+        await _say(update, texts.FIX_PICK, _kb(rows))
+        return PICK_SUBMISSION
+
     for item in mine:
         status = texts.FIX_STATUS.get(item["status"], item["status"])
         label = f"{item['summary']} — {status}"
@@ -2596,6 +2694,11 @@ async def on_pick_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if parts[1] == "back":
         return await _start_correction(update, context)
+
+    if parts[1] == "tree":
+        _begin(context, flows.CORRECTION)
+        _state(context)["answers"]["_tree_fix"] = True
+        return await _ask(update, context)
 
     fixing = parts[1] == "go"
     submission_id = int(parts[-1])
