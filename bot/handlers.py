@@ -319,8 +319,12 @@ async def _recorded_parents(
         "label": who.get("label"),
     }
     names: list[str] = []
-    if ref.get("person_id"):
-        names += await store.person_parents(ref["person_id"])
+    # A ref that pointed at a submission may mean a person on the tree by
+    # now — an approval can happen mid-conversation, and the tree is the
+    # authority the moment it does.
+    person_id = await store.resolved_person_id(ref)
+    if person_id:
+        names += await store.person_parents(person_id)
     # Sent-but-unapproved parents count too — the basket empties the moment
     # a batch is confirmed, so the queue is where the answer usually lives.
     if cursor is None:

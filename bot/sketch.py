@@ -103,8 +103,21 @@ def build(payloads: list[dict], self_name: str | None = None,
         for family in families:
             # The same father with and without a mother yet is one family.
             if set(parents) & set(family.parents):
-                merged = tuple(dict.fromkeys(family.parents + parents))
-                family.parents = merged
+                # One family node is one couple — a second claim about the
+                # same couple can only be the same people, however bare the
+                # spelling. Without this, a re-entered bare "Toufic" next to
+                # the existing full name drew a three-parent marriage.
+                for name in parents:
+                    kin_match = next(
+                        (p for p in family.parents if _kin(p, name)), None
+                    )
+                    if kin_match is None:
+                        family.parents = family.parents + (name,)
+                    elif name != kin_match:
+                        if len(name) > len(kin_match):
+                            _rename(kin_match, name)
+                        else:
+                            _rename(name, kin_match)
                 return family
         family = _Family(parents)
         families.append(family)

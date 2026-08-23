@@ -356,6 +356,35 @@ async def person_parents(person_id: int) -> list[str]:
     return await _run(_person_parents, person_id)
 
 
+def _resolved_person_id(conn: sqlite3.Connection, ref: dict[str, Any]) -> int | None:
+    import review
+
+    try:
+        return review.resolve_subject(
+            conn,
+            {"about": {
+                "submission_id": ref.get("submission_id"),
+                "label": ref.get("label"),
+            }},
+        )
+    except review.Blocked:
+        return None
+
+
+async def resolved_person_id(ref: dict[str, Any]) -> int | None:
+    """The person a cursor ref means, once its submission was approved.
+
+    A contributor's saved session can point at a submission from before a
+    round of approvals. The person now stands in the tree with parents and
+    all — answering questions from the stale ref alone re-asks what the
+    tree already knows."""
+    if ref.get("person_id"):
+        return int(ref["person_id"])
+    if not ref.get("submission_id"):
+        return None
+    return await _run(_resolved_person_id, ref)
+
+
 def _person_father_given(conn: sqlite3.Connection, person_id: int) -> str | None:
     for row in db.get_parents(conn, person_id):
         if row["sex"] == "M":

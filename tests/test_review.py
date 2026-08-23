@@ -691,6 +691,44 @@ class AnchorTests(ReviewTestCase):
             db.get_person(self.conn, new_father)["given_name"], "Semaan"
         )
 
+    def test_a_stale_submission_ref_resolves_to_the_approved_person(self):
+        # A contributor's saved session can point at a submission from
+        # before a round of approvals. The bot must find the person the
+        # ref means — or it re-asks what the tree already answers.
+        import asyncio
+
+        from bot import store
+
+        child = db.create_person(self.conn, "Sami", sex="M")
+        sid = self.add_parents_of(child, "Tanios", "Zeina")
+        self.conn.commit()
+
+        zeina = self.person_named("Zeina")
+        resolved = asyncio.run(
+            store.resolved_person_id({"submission_id": sid, "label": "Zeina"})
+        )
+        self.assertEqual(resolved, zeina["id"])
+
+        # A ref at a still-pending submission resolves to nobody — quietly.
+        pending = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Semaan", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+            S.subject(submission_id=sid, label="Zeina"),
+        )
+        follow_up = self.queue(
+            S.ADD_PARENTS,
+            [S.person(S.FATHER, "Antoun", sex="M")],
+            S.subject(submission_id=pending, label="Semaan"),
+        )
+        self.conn.commit()
+        payload = db.submission_payload(db.get_submission(self.conn, follow_up))
+        self.assertIsNone(
+            asyncio.run(store.resolved_person_id(payload["about"]))
+        )
+
     def test_a_mothers_maiden_name_is_not_a_variant_of_her_husbands(self):
         child = db.create_person(self.conn, "Sami", sex="M")
         sid = self.queue(
