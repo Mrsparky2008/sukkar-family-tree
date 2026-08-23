@@ -110,6 +110,13 @@ FAMILY_TREE_DB=$DATA/family.db
 
 AWS_DEFAULT_REGION=$REGION
 BACKUP_BUCKET=$BUCKET
+
+# The public chart, once the family decides to publish it. PUBLIC_SITE_BUCKET
+# is the S3 bucket tree-publish uploads to (public-read, one file);
+# PUBLIC_URL is the link the bot hands out. Both unset = the tree stays
+# private and the bot says so.
+#PUBLIC_SITE_BUCKET=
+#PUBLIC_URL=
 ENV
   # Only the no-role deployment needs stored keys; on EC2 the instance role
   # signs S3 calls and empty key lines would break it.
@@ -201,6 +208,9 @@ sqlite3 "$FAMILY_TREE_DB" ".backup '$WORK/family.db'"
 
 aws s3 cp "$WORK/family.db"   "s3://$BACKUP_BUCKET/$STAMP/family.db"   --only-show-errors
 aws s3 cp "$WORK/family.json" "s3://$BACKUP_BUCKET/$STAMP/family.json" --only-show-errors
+# The nightly pass also refreshes the public chart, so approvals show up on
+# the family link within a day even if nobody publishes by hand.
+/usr/local/bin/tree-publish || true
 logger -t family-tree "backup written for $STAMP"
 BACKUP
 chmod +x /usr/local/bin/family-tree-backup
@@ -250,6 +260,24 @@ exec /opt/family-tree/.venv/bin/python /opt/family-tree/web/build.py \
   --db "$FAMILY_TREE_DB" --out "$OUT"
 CHART
 chmod +x /usr/local/bin/tree-chart
+
+cat > /usr/local/bin/tree-publish <<'PUBLISH'
+#!/bin/bash
+# Rebuild the public chart from the live tree and put it at the family link.
+# A quiet no-op until PUBLIC_SITE_BUCKET is set in .env.
+set -euo pipefail
+set -a; . /opt/family-tree/.env; set +a
+[ -n "$${PUBLIC_SITE_BUCKET:-}" ] || exit 0
+OUT=$(mktemp --suffix=.html)
+trap 'rm -f "$OUT"' EXIT
+/opt/family-tree/.venv/bin/python /opt/family-tree/web/build.py \
+  --db "$FAMILY_TREE_DB" --out "$OUT" >/dev/null
+aws s3 cp "$OUT" "s3://$PUBLIC_SITE_BUCKET/tree.html" \
+  --content-type "text/html; charset=utf-8" \
+  --cache-control "max-age=300" --only-show-errors
+logger -t family-tree "chart published"
+PUBLISH
+chmod +x /usr/local/bin/tree-publish
 
 cat > /usr/local/bin/tree-update <<'UPDATE'
 #!/bin/bash
