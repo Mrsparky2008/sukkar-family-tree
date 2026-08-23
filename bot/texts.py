@@ -43,6 +43,11 @@ ASK_SELF_FATHER_WHY = (
 )
 
 ASK_SELF_SEX = "And are you a man or a woman? It's how the tree draws you."
+
+FATHER_NOT_FAMILY = (
+    "That's the family name — I need your father's FIRST name. "
+    "What was he called?"
+)
 SELF_MAN = "Man"
 SELF_WOMAN = "Woman"
 

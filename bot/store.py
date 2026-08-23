@@ -444,6 +444,7 @@ def _own_submission_exists(
     about_person_id: int | None = None,
     about_submission_id: int | None = None,
     about_self: bool = False,
+    about_label: str | None = None,
 ) -> bool:
     state = _contributor_state(conn, telegram_user_id)
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=100):
@@ -466,6 +467,7 @@ def _own_submission_exists(
             if (
                 about_submission_id
                 and about.get("submission_id") == about_submission_id
+                and _same_label(about.get("label"), about_label)
             ):
                 return True
     return False
@@ -477,6 +479,7 @@ async def own_submission_exists(
     about_person_id: int | None = None,
     about_submission_id: int | None = None,
     about_self: bool = False,
+    about_label: str | None = None,
 ) -> bool:
     """Whether this contributor already sent a claim of this kind about this
     person — what lets the tour skip a step somebody has already done."""
@@ -487,6 +490,7 @@ async def own_submission_exists(
         about_person_id,
         about_submission_id,
         about_self,
+        about_label,
     )
 
 
@@ -526,11 +530,22 @@ async def pending_payloads(telegram_user_id: int) -> list[dict]:
     return await _run(_pending_payloads, telegram_user_id)
 
 
+def _same_label(a: str | None, b: str | None) -> bool:
+    """Whether two subject labels name the same person, by first name.
+
+    A submission can hold two people — a father AND a mother — so matching
+    on submission id alone once handed Wadiha's parents to Kalim."""
+    if not a or not b:
+        return True  # nothing to compare; the id match stands alone
+    return a.split()[0].casefold() == b.split()[0].casefold()
+
+
 def _queued_parent_names(
     conn: sqlite3.Connection,
     telegram_user_id: int,
     about_person_id: int | None,
     about_submission_id: int | None,
+    about_label: str | None,
 ) -> list[str]:
     names: list[str] = []
     for row in db.list_submissions_by_user(conn, telegram_user_id, limit=200):
@@ -538,10 +553,14 @@ def _queued_parent_names(
         if payload.get("kind") != submissions.ADD_PARENTS:
             continue
         about = payload.get("about") or {}
-        if (about_person_id and about.get("person_id") == about_person_id) or (
+        matched = (
+            about_person_id and about.get("person_id") == about_person_id
+        ) or (
             about_submission_id
             and about.get("submission_id") == about_submission_id
-        ):
+            and _same_label(about.get("label"), about_label)
+        )
+        if matched:
             names += [e["given_name"] for e in payload.get("people") or []]
     return names
 
@@ -550,9 +569,14 @@ async def queued_parent_names(
     telegram_user_id: int,
     about_person_id: int | None = None,
     about_submission_id: int | None = None,
+    about_label: str | None = None,
 ) -> list[str]:
     return await _run(
-        _queued_parent_names, telegram_user_id, about_person_id, about_submission_id
+        _queued_parent_names,
+        telegram_user_id,
+        about_person_id,
+        about_submission_id,
+        about_label,
     )
 
 

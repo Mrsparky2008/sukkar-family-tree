@@ -181,6 +181,15 @@ def build(payloads: list[dict], self_name: str | None = None,
 
     def couple_line(name: str) -> str:
         partner = spouses.get(name)
+        # A marriage that already stands as a couple's own family node
+        # belongs to THAT couple — never to a child who happens to carry
+        # the grandfather's name. Kalim's grandson Kalim is not ⚭ Wadiha.
+        if partner and any(
+            set(f.parents) == {name, partner}
+            for f in families
+            if len(f.parents) == 2
+        ):
+            partner = None
         return f"{deco(name)} ⚭ {deco(partner)}" if partner else deco(name)
 
     def draw(family: _Family, indent: str) -> None:

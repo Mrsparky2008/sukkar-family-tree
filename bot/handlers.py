@@ -330,6 +330,7 @@ async def _recorded_parents(
             who["telegram_user_id"],
             about_person_id=ref.get("person_id"),
             about_submission_id=ref.get("submission_id"),
+            about_label=ref.get("label"),
         )
     names += queued
 
@@ -907,6 +908,7 @@ async def _role_recorded(
         about_person_id=(ref or {}).get("person_id"),
         about_submission_id=(ref or {}).get("submission_id"),
         about_self=ref is None,
+        about_label=(ref or {}).get("label"),
     )
 
 
@@ -1473,6 +1475,17 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         value = flows.clean(step, typed)
     except flows.FlowError as problem:
         await _say(update, str(problem))
+        return await _ask(update, context)
+
+    # "And your father's first name?" answered with the family name — not
+    # a father, however natural the reflex. One live signup did exactly this.
+    if (
+        step.id == "father_given"
+        and value.casefold()
+        in {v.casefold() for v in config.FAMILY_NAME_VARIANTS}
+        | {config.FAMILY_NAME.casefold()}
+    ):
+        await _say(update, texts.FATHER_NOT_FAMILY)
         return await _ask(update, context)
 
     # No read-back. Confirming every single name doubled the taps and made the
