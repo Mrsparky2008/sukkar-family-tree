@@ -471,14 +471,14 @@ SKETCH_EMPTY = (
 
 MENU_TYPE_HINT = (
     "Use a button above — or just type the names out and I'll sort them:\n\n"
-    "    my father's parents are Toufic and Cilene\n"
+    "    my father's parents are Toufic and Seleneh\n"
     "    his sisters are Dibeh, Sonia and Rima"
 )
 
 DICTATED_NOTHING = (
     "I couldn't pick any names out of that, sorry.\n\n"
     "Try it like this:\n"
-    "    his parents are Toufic and Cilene\n"
+    "    his parents are Toufic and Seleneh\n"
     "    his sisters are Dibeh, Sonia and Saide"
 )
 
