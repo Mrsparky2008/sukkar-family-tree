@@ -39,8 +39,16 @@ then family name. Because the string is regenerated on every read, correcting a
 father link corrects every name derived from it — it cannot drift.
 
 **4. Nothing writes directly to the people table.**
-Every submission, *including every correction*, lands in `submissions` and waits
-for an admin. No exceptions.
+Every submission, *including every correction*, lands in `submissions` and goes
+through the same review functions. One reviewer is not a person: the system
+reviewer (id 0) approves exactly one shape of claim the moment it arrives —
+an admitted contributor telling their own story (their parents, siblings,
+spouse, children), resembling nobody on the tree or in the queue, and
+contradicting nothing recorded. Every such approval is marked as the system's
+forever. Sign-ups, corrections, and anything second-hand, overlapping, or
+conflicting wait for a person — and a claim that disagrees with the record
+first sends a question to whoever made the standing entry, so the family
+settles most of it before an admin has to.
 
 **5. Names are for humans; numbers are the reference.**
 Every approved person keeps one permanent number (`#12`) that never changes —

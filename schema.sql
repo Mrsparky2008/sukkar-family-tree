@@ -197,3 +197,29 @@ CREATE TABLE IF NOT EXISTS contributors (
 );
 
 CREATE INDEX IF NOT EXISTS idx_contributors_branch ON contributors(branch_id);
+
+
+-- ---------------------------------------------------------------------------
+-- peer_checks — "you said this, they said that"
+--
+-- When a new claim overlaps or disagrees with something already recorded,
+-- the bot asks the person behind the standing record how confident they
+-- are. Their answer lands here, attached to the pending submission, as one
+-- more piece of evidence for whoever reviews it. Append-only, like
+-- everything else that carries family knowledge.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS peer_checks (
+    id               INTEGER PRIMARY KEY,
+    submission_id    INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+    telegram_user_id INTEGER NOT NULL,
+    -- What they were shown, so the answer can be read in context forever.
+    question         TEXT,
+    -- 'stands' (their original holds), 'concedes' (the new claim is right),
+    -- 'unsure', or NULL while the question is still out.
+    verdict          TEXT CHECK (verdict IS NULL OR verdict IN ('stands', 'concedes', 'unsure')),
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    answered_at      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_peer_checks_submission ON peer_checks(submission_id);

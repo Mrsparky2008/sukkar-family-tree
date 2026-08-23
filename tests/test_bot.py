@@ -395,7 +395,10 @@ class AddChildTests(BotTestCase):
         self.assertEqual(payload["people"][0]["sex"], "F")
         self.assertEqual(payload["about"]["person_id"], self.ids["khalil_y"])
 
-    async def test_adding_never_creates_a_person(self):
+    async def test_a_first_hand_uncontested_claim_lands_instantly(self):
+        # The system reviewer: an admitted contributor telling their own
+        # story, resembling nobody, contradicting nothing — straight onto
+        # the tree, marked as the system's forever.
         before = self.people_count()
         chat = await self.identified_as_khalil()
         await chat.tap(texts.MENU_ADD_CHILD)
@@ -403,7 +406,11 @@ class AddChildTests(BotTestCase):
         await chat.tap("1")
         await chat.say("Rita")
         await self.send_basket(chat)
-        self.assertEqual(self.people_count(), before, "constraint 4 violated")
+        self.assertEqual(self.people_count(), before + 1)
+        record = self.queued()[-1]
+        self.assertEqual(record["status"], "approved")
+        self.assertIn("Straight onto the tree", chat.transcript())
+        self.assertIn("(#", chat.transcript())
 
     async def test_a_save_offers_the_next_step(self):
         chat = await self.identified_as_khalil()
@@ -804,6 +811,54 @@ class NumberedNamesTests(BotTestCase):
         self.assertIn(f"(#{boutros})", chat.text)
 
 
+class SystemReviewerTests(BotTestCase):
+    """Green flows, yellow talks, people referee.
+
+    The system reviewer approves exactly one shape of claim: first-hand,
+    resembling nobody, contradicting nothing. Everything else waits."""
+
+    async def test_an_overlapping_name_goes_yellow_not_green(self):
+        # Mariam is already Khalil's daughter — re-entering her must wait
+        # for a person, and say so.
+        before = self.people_count()
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap("0")
+        await chat.tap("1")
+        await chat.say("Mariam")
+        await self.send_basket(chat)
+        self.assertEqual(self.people_count(), before)
+        self.assertEqual(self.queued()[-1]["status"], "pending")
+        self.assertIn(texts.QUEUED_FOR_CHECK, chat.transcript())
+
+    async def test_second_hand_claims_wait_quietly(self):
+        # About the uncle, not about themselves: the ordinary queue,
+        # no announcement either way.
+        before = self.people_count()
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap(f"(#{self.ids['boutros']})")
+        await chat.tap("child of")
+        await chat.tap("1")
+        await chat.tap("0")
+        await chat.say("Fares")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        self.assertEqual(self.people_count(), before)
+        self.assertEqual(self.queued()[-1]["status"], "pending")
+        self.assertNotIn("Straight onto the tree", chat.transcript())
+
+    async def test_a_conflicting_claim_over_a_recorded_spouse_waits(self):
+        # Khalil's wife Therese is on the tree — a second spouse claim is
+        # exactly the single-slot conflict that must never flow green.
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_SPOUSE)
+        await chat.say("Marta")
+        if texts.SKIP in chat.buttons:
+            await chat.tap(texts.SKIP)
+        await self.send_basket(chat)
+        self.assertEqual(self.queued()[-1]["status"], "pending")
+
+
 class TreeLinkButtonTests(BotTestCase):
     """The whole tree, one tap from the end of every menu — once published."""
 
@@ -853,6 +908,16 @@ class PhoneReviewTests(BotTestCase):
         await chat.say(name)
         await chat.tap(texts.CONFIRM_CORRECT)
 
+    async def queue_for_desk(self, chat, name="Rita"):
+        """A claim about somebody else — second-hand, so it always waits."""
+        await chat.tap(texts.MENU_SWITCH)
+        await chat.tap(f"(#{self.ids['boutros']})")
+        await chat.tap("child of")
+        await chat.tap("0")
+        await chat.tap("1")
+        await chat.say(name)
+        await chat.tap(texts.CONFIRM_CORRECT)
+
     async def test_the_desk_is_for_admins_only(self):
         chat = await self.identified_as_khalil(user_id=5002)
         await self.open_desk(chat)
@@ -861,7 +926,7 @@ class PhoneReviewTests(BotTestCase):
     async def test_an_admin_approves_from_the_phone(self):
         chat = await self.identified_as_khalil()
         before = self.people_count()
-        await self.queue_a_child(chat)
+        await self.queue_for_desk(chat)
 
         await self.open_desk(chat)
         self.assertIn("Reviewing #", chat.text)
@@ -886,14 +951,14 @@ class PhoneReviewTests(BotTestCase):
 
     async def test_skip_leaves_it_pending(self):
         chat = await self.identified_as_khalil()
-        await self.queue_a_child(chat)
+        await self.queue_for_desk(chat)
         await self.open_desk(chat)
         await chat.tap(texts.REVIEW_SKIP)
         self.assertEqual(self.queued()[-1]["status"], "pending")
 
     async def test_reject_keeps_the_record(self):
         chat = await self.identified_as_khalil()
-        await self.queue_a_child(chat)
+        await self.queue_for_desk(chat)
         await self.open_desk(chat)
         await chat.tap(texts.REVIEW_REJECT)
         record = self.queued()[-1]
@@ -947,10 +1012,18 @@ class FixSomethingTests(BotTestCase):
         await chat.say("Actually he is Samir")
         await chat.tap(texts.SEND_IT)
 
-        self.assertEqual(self.people_count(), 12)
+        # Sami landed instantly (first-hand, uncontested) — but the
+        # correction changes nothing by itself, and never will.
+        self.assertEqual(self.people_count(), 13)
         self.assertEqual(self.queued()[0]["payload"], original)
-        for row in self.queued():
-            self.assertEqual(row["status"], "pending")
+        correction = self.queued()[-1]
+        self.assertEqual(correction["payload"]["kind"], submissions.CORRECTION)
+        self.assertEqual(correction["status"], "pending")
+        conn = db.connect()
+        sami = [r for r in db.get_people(conn) if r["given_name"] == "Sami"]
+        conn.close()
+        self.assertEqual(len(sami), 1)
+        self.assertEqual(sami[0]["given_name"], "Sami", "correction auto-applied")
 
 
 # ===========================================================================
@@ -1574,13 +1647,15 @@ class LinkQuestionTests(BotTestCase):
         await second.tap("Khalil Youssef")
         await second.say("His brother is Tanios")
 
+        # Khalil's first-hand Tanios landed instantly, so the collision is
+        # now with a numbered person, not a pending row.
         self.assertIn("Is this the same person as Tanios", second.text)
-        self.assertIn(texts.MATCH_PENDING_SUFFIX.strip(), second.text)
+        self.assertIn("(#", second.text)
         await second.tap(texts.SAME_PERSON)
         await second.tap("Send all")
 
         entry = self.queued()[-1]["payload"]["people"][0]
-        self.assertIn("same_submission_id", entry)
+        self.assertIn("same_person_id", entry)
 
     async def test_the_link_fires_before_any_admin_has_approved_anything(self):
         """One person enters their siblings; later a sibling signs up and

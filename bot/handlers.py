@@ -2610,6 +2610,75 @@ async def on_confirm_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await _show_menu(update, context, texts.CANCELLED)
 
 
+async def _triage(update, context, user_id: int, submission_id: int) -> None:
+    """Green flows, yellow talks: run the system reviewer on what was just
+    queued, and carry any outreach question to the person it belongs to."""
+    verdict = await store.auto_review(user_id, submission_id)
+    slate = context.user_data.setdefault("triage", {"green": [], "yellow": 0})
+    if verdict.get("tier") == "green":
+        slate["green"] += verdict.get("created") or []
+    elif verdict.get("tier") == "yellow":
+        slate["yellow"] += 1
+        outreach = verdict.get("outreach")
+        bot = getattr(context, "bot", None)
+        if outreach and bot is not None:
+            rows = [
+                [_button(texts.PEER_STANDS,
+                         f"peer:{outreach['check_id']}:stands")],
+                [_button(texts.PEER_CONCEDES,
+                         f"peer:{outreach['check_id']}:concedes")],
+                [_button(texts.PEER_UNSURE,
+                         f"peer:{outreach['check_id']}:unsure")],
+            ]
+            try:
+                await bot.send_message(
+                    chat_id=outreach["chat_id"],
+                    text=outreach["question"],
+                    reply_markup=_kb(rows),
+                )
+            except Exception:
+                # They may have blocked the bot or never started it — the
+                # check stays recorded either way, and the desk shows it
+                # as asked-but-unanswered.
+                log.warning("peer check %s undeliverable", outreach["check_id"])
+
+
+async def _announce_triage(update, context) -> None:
+    slate = context.user_data.pop("triage", None)
+    if not slate:
+        return
+    green = slate["green"]
+    if green:
+        names = [texts.tagged(g["label"], g["person_id"]) for g in green]
+        if len(names) == 1:
+            await _say(update, texts.AUTO_APPROVED_ONE.format(name=names[0]))
+        else:
+            await _say(
+                update,
+                texts.AUTO_APPROVED_MANY.format(
+                    names="\n".join(f"  {name}" for name in names)
+                ),
+            )
+        _refresh_published_chart()
+    if slate["yellow"]:
+        await _say(update, texts.QUEUED_FOR_CHECK)
+
+
+async def on_peer_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """An answer to a "you said this, they said that" question."""
+    query = update.callback_query
+    await query.answer()
+    try:
+        _, check_id, verdict = query.data.split(":")
+        recorded = await store.answer_peer_check(
+            update.effective_user.id, int(check_id), verdict
+        )
+    except (ValueError, TypeError):
+        recorded = False
+    if recorded:
+        await _say(update, texts.PEER_THANKS[verdict])
+
+
 async def _flush_basket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Queue everything collected, oldest first, resolving draft references.
 
@@ -2641,7 +2710,9 @@ async def _flush_basket(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         if draft_id:
             draft_to_submission[draft_id] = result["submission_id"]
         sent += 1
+        await _triage(update, context, user_id, result["submission_id"])
     context.user_data["basket"] = []
+    await _announce_triage(update, context)
 
     # Anything still pointing at a draft — the cursor, the what-next targets —
     # now points at the real submission instead.
@@ -2700,6 +2771,8 @@ async def _show_review_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines = [texts.review_heading(item["id"], item["remaining"]), ""]
     lines.append(item["summary"])
     lines += item["details"]
+    for check in item.get("checks") or []:
+        lines.append(texts.review_check_line(check["who"], check["verdict"]))
 
     rows: list[list[InlineKeyboardButton]] = []
     match = item.get("match")

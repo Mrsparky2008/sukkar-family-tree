@@ -729,6 +729,56 @@ class AnchorTests(ReviewTestCase):
             asyncio.run(store.resolved_person_id(payload["about"]))
         )
 
+    def test_a_conflicting_first_hand_claim_asks_the_standing_author(self):
+        # 8001 put Sami's parents down, reviewed and approved. Later Sami
+        # himself signs in and names different parents. The system asks
+        # 8001 how confident they are — and only 8001 may answer.
+        import asyncio
+
+        from bot import store
+
+        sami = db.create_person(self.conn, "Sami", sex="M")
+        standing = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Tanios", sex="M"),
+                S.person(S.MOTHER, "Zeina", sex="F"),
+            ],
+            S.subject(person_id=sami, label="Sami"),
+            user=8001,
+        )
+        review.approve(self.conn, standing, reviewed_by=1, force=True)
+        db.upsert_contributor(self.conn, 8002, linked_person_id=sami)
+        disputed = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, "Semaan", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+            S.subject(person_id=sami, label="Sami"),
+            user=8002,
+        )
+        self.conn.commit()
+
+        verdict = asyncio.run(store.auto_review(8002, disputed))
+        self.assertEqual(verdict["tier"], "yellow")
+        self.assertIsNotNone(verdict["outreach"], "nobody was asked")
+        self.assertEqual(verdict["outreach"]["chat_id"], 8001)
+        self.assertEqual(
+            db.get_submission(self.conn, disputed)["status"], "pending"
+        )
+
+        check_id = verdict["outreach"]["check_id"]
+        # A stranger's answer is refused; the person asked gets recorded.
+        self.assertFalse(
+            asyncio.run(store.answer_peer_check(9999, check_id, "stands"))
+        )
+        self.assertTrue(
+            asyncio.run(store.answer_peer_check(8001, check_id, "concedes"))
+        )
+        answered = db.peer_checks_for(self.conn, disputed)[0]
+        self.assertEqual(answered["verdict"], "concedes")
+
     def test_a_mothers_maiden_name_is_not_a_variant_of_her_husbands(self):
         child = db.create_person(self.conn, "Sami", sex="M")
         sid = self.queue(

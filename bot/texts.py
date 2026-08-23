@@ -645,6 +645,54 @@ def review_done(count: int) -> str:
 
 REVIEW_QUEUE_CLEAR = "Nothing waiting — the queue is clear."
 
+
+def review_check_line(who: str, verdict: str | None) -> str:
+    word = {
+        "stands": "stands by their version",
+        "concedes": "says the new claim is right",
+        "unsure": "isn't sure",
+        None: "was asked, hasn't answered yet",
+    }[verdict]
+    return f"Family check: {who} — {word}."
+
+
+# --- green and yellow -------------------------------------------------------
+#
+# First-hand, uncontested claims from an admitted contributor go straight
+# onto the tree, permanent numbers and all. A claim that overlaps or
+# disagrees with the record sends a question to the person behind the
+# standing entry — the family sorts most of it out before any admin has to.
+
+AUTO_APPROVED_ONE = "Straight onto the tree: {name}."
+
+AUTO_APPROVED_MANY = "Straight onto the tree:\n{names}"
+
+QUEUED_FOR_CHECK = (
+    "Some of what you added touches people already on the tree, so it gets "
+    "a quick once-over before it lands — nothing for you to do."
+)
+
+
+def peer_check_question(asker: str, claim: str, standing: str) -> str:
+    return (
+        f"Quick family check.\n\n"
+        f"{asker} just added: {claim}.\n\n"
+        f"The tree already shows {standing}, which came from you.\n\n"
+        f"How confident are you in yours? If it needs fixing, the menu's "
+        f"\"Fix something I submitted\" opens your entry to change."
+    )
+
+
+PEER_STANDS = "What I said stands"
+PEER_CONCEDES = "They're right"
+PEER_UNSURE = "Not sure"
+
+PEER_THANKS = {
+    "stands": "Noted — your version stands on the record.",
+    "concedes": "Noted — that goes with the claim for the reviewer.",
+    "unsure": "Noted, honestly the most useful answer there is.",
+}
+
 FIX_THIS = "Something's wrong — fix it"
 FIX_BACK = "Back to the list"
 

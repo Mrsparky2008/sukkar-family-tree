@@ -357,6 +357,161 @@ async def person_parents(person_id: int) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# The system reviewer — green flows, yellow talks, people referee
+# ---------------------------------------------------------------------------
+#
+# Nothing here weakens the queue: every write still goes through the same
+# review functions, and every decision is recorded with its reviewer. The
+# system reviewer (id 0) approves exactly one shape of claim — an admitted
+# contributor telling their own story, resembling nobody, contradicting
+# nothing. Everything else waits for a person; and when a claim disagrees
+# with something already recorded, the person behind the standing record is
+# asked how confident they are, so the family sorts most of it out before
+# any admin has to.
+
+SYSTEM_REVIEWER = 0
+
+_FIRST_HAND_KINDS = {
+    submissions.ADD_PARENTS,
+    submissions.ADD_SIBLING,
+    submissions.ADD_SPOUSE,
+    submissions.ADD_CHILD,
+}
+
+
+def _standing_conflict(conn: sqlite3.Connection, me: int, kind: str) -> str | None:
+    """A single-slot fact already filled: the one shape of first-hand claim
+    that can contradict the record outright rather than merely overlap."""
+    person = db.get_person(conn, me)
+    if person is None:
+        return None
+    if kind == submissions.ADD_PARENTS and (
+        person["father_id"] or person["mother_id"]
+    ):
+        return "parents already recorded"
+    if kind == submissions.ADD_SPOUSE and db.get_partners(conn, me):
+        return "a spouse already recorded"
+    return None
+
+
+def _standing_author(conn: sqlite3.Connection, person_id: int) -> int | None:
+    """Who told us about this person — the contributor, not the reviewer."""
+    person = db.get_person(conn, person_id)
+    if person is None or not person["from_submission_id"]:
+        return None
+    origin = db.get_submission(conn, person["from_submission_id"])
+    return origin["telegram_user_id"] if origin else None
+
+
+def _auto_review(
+    conn: sqlite3.Connection, telegram_user_id: int, submission_id: int
+) -> dict[str, Any]:
+    import review
+
+    row = db.get_submission(conn, submission_id)
+    if row is None or row["status"] != "pending":
+        return {"tier": "manual"}
+    payload = db.submission_payload(row)
+    kind = payload.get("kind")
+
+    contributor = db.get_contributor(conn, telegram_user_id)
+    me = contributor["linked_person_id"] if contributor else None
+    about = payload.get("about") or {}
+    # First-hand means: an admitted contributor (a person approved their
+    # sign-up) speaking about their own immediate circle, from their own
+    # account. Anything else is the ordinary queue.
+    if kind not in _FIRST_HAND_KINDS or not me or about.get("person_id") != me:
+        return {"tier": "manual"}
+
+    overlaps = [
+        match
+        for match in review.evidence(conn, payload, submission_id)
+        if match["score"] >= 0.5
+    ]
+    conflict = _standing_conflict(conn, me, kind)
+
+    if not overlaps and not conflict:
+        try:
+            review.approve(conn, submission_id, SYSTEM_REVIEWER)
+        except review.Blocked as blocked:
+            return {"tier": "yellow", "why": str(blocked), "outreach": None}
+        conn.execute(
+            "UPDATE submissions SET review_note = ? WHERE id = ?",
+            ("auto-approved: first-hand and uncontested", submission_id),
+        )
+        created = [
+            {
+                "person_id": person["id"],
+                "label": db.row_display_name(person),
+            }
+            for person in db.people_from_submission(conn, submission_id)
+        ]
+        return {"tier": "green", "created": created}
+
+    # Yellow: find the person behind the standing record and ask them.
+    why = conflict or "resembles someone already recorded"
+    outreach = None
+    strongest = next(
+        (match for match in overlaps if match["kind"] == "person"), None
+    )
+    author = None
+    standing_label = None
+    if strongest:
+        author = _standing_author(conn, strongest["person_id"])
+        standing_label = texts.tagged(
+            strongest["label"], strongest["person_id"]
+        )
+    elif conflict:
+        person = db.get_person(conn, me)
+        for column in ("father_id", "mother_id"):
+            if person[column]:
+                author = _standing_author(conn, person[column])
+                standing = db.get_person(conn, person[column])
+                standing_label = texts.tagged(
+                    db.row_display_name(standing), standing["id"]
+                )
+                break
+    if author and author != telegram_user_id:
+        question = texts.peer_check_question(
+            asker=contributor["display_label"] or "A relative",
+            claim=submissions.describe(payload),
+            standing=standing_label or "what the tree shows",
+        )
+        check_id = db.add_peer_check(conn, submission_id, author, question)
+        outreach = {
+            "chat_id": author,
+            "check_id": check_id,
+            "question": question,
+        }
+    return {"tier": "yellow", "why": why, "outreach": outreach}
+
+
+async def auto_review(telegram_user_id: int, submission_id: int) -> dict[str, Any]:
+    """Triage a freshly queued submission. Explicitly called by the bot
+    after queueing — queuing alone still never changes the family."""
+    return await _run(_auto_review, telegram_user_id, submission_id)
+
+
+def _answer_peer_check(
+    conn: sqlite3.Connection, telegram_user_id: int, check_id: int, verdict: str
+) -> bool:
+    """Record an answer — only from the person who was actually asked."""
+    check = db.get_peer_check(conn, check_id)
+    if check is None or check["telegram_user_id"] != telegram_user_id:
+        return False
+    if verdict not in ("stands", "concedes", "unsure"):
+        return False
+    db.answer_peer_check(conn, check_id, verdict)
+    return True
+
+
+async def answer_peer_check(
+    telegram_user_id: int, check_id: int, verdict: str
+) -> bool:
+    return await _run(_answer_peer_check, telegram_user_id, check_id, verdict)
+
+
+# ---------------------------------------------------------------------------
 # The review desk, from a phone
 # ---------------------------------------------------------------------------
 #
@@ -396,12 +551,23 @@ def _next_pending(
                 "reasons": list(item.get("reasons") or []),
             }
             break
+    checks = []
+    for check in db.peer_checks_for(conn, row["id"]):
+        who = db.get_contributor(conn, check["telegram_user_id"])
+        checks.append(
+            {
+                "who": (who["display_label"] if who else None)
+                or f"user {check['telegram_user_id']}",
+                "verdict": check["verdict"],
+            }
+        )
     return {
         "remaining": len(rows),
         "id": row["id"],
         "summary": submissions.describe(payload),
         "details": submissions.detail_lines(payload),
         "match": match,
+        "checks": checks,
     }
 
 

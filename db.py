@@ -549,6 +549,53 @@ def get_unions(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute("SELECT * FROM unions ORDER BY id").fetchall()
 
 
+# ---------------------------------------------------------------------------
+# Peer checks — "you said this, they said that"
+# ---------------------------------------------------------------------------
+
+
+def add_peer_check(
+    conn: sqlite3.Connection,
+    submission_id: int,
+    telegram_user_id: int,
+    question: str,
+) -> int:
+    cursor = conn.execute(
+        """INSERT INTO peer_checks (submission_id, telegram_user_id, question)
+           VALUES (?, ?, ?)""",
+        (submission_id, telegram_user_id, question),
+    )
+    return int(cursor.lastrowid)
+
+
+def get_peer_check(conn: sqlite3.Connection, check_id: int) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM peer_checks WHERE id = ?", (check_id,)
+    ).fetchone()
+
+
+def answer_peer_check(
+    conn: sqlite3.Connection, check_id: int, verdict: str
+) -> None:
+    """Record the answer. Append-only in spirit: a verdict is written once
+    and the question text stays exactly as it was asked."""
+    conn.execute(
+        """UPDATE peer_checks
+              SET verdict = ?, answered_at = datetime('now')
+            WHERE id = ? AND verdict IS NULL""",
+        (verdict, check_id),
+    )
+
+
+def peer_checks_for(
+    conn: sqlite3.Connection, submission_id: int
+) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM peer_checks WHERE submission_id = ? ORDER BY id",
+        (submission_id,),
+    ).fetchall()
+
+
 # ===========================================================================
 # Branches
 # ===========================================================================

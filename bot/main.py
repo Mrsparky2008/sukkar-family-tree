@@ -186,6 +186,11 @@ def build_application(token: str | None = None) -> Application:
     application.add_handler(build_conversation())
     application.add_handler(CommandHandler("share", handlers.share))
     application.add_handler(CommandHandler("help", handlers.help_command))
+    # Peer-check answers can arrive whatever the person was doing — they
+    # ride outside the conversation so no state can swallow them.
+    application.add_handler(
+        CallbackQueryHandler(handlers.on_peer_check, pattern=r"^peer:")
+    )
     application.add_error_handler(handlers.on_error)
     return application
 
