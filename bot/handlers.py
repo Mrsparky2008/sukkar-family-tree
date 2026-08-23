@@ -49,7 +49,8 @@ log = logging.getLogger(__name__)
     TOUR,
     CONFIRM_PERSON,
     COUNTED,
-) = range(15)
+    REVIEW_DESK,
+) = range(16)
 
 # --- callback data ---------------------------------------------------------
 
@@ -64,6 +65,7 @@ CB_CANCEL = "cancel"
 CB_IDENTITY = "who"
 CB_NOBODY = "who:none"
 CB_FIX = "fix"
+CB_ADMIN = "adm"
 CB_SUBJECT = "subj"
 CB_SWITCH = "menu:switch"
 CB_CLIMB_YES = "climb:yes"
@@ -2658,6 +2660,131 @@ async def on_send_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================================================================
 # Fix something I submitted
 # ===========================================================================
+
+
+# ===========================================================================
+# The review desk — /review, super admins only
+# ===========================================================================
+
+
+async def on_review_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in config.SUPER_ADMIN_TELEGRAM_IDS:
+        return await _show_menu(update, context, texts.REVIEW_NOT_ADMIN)
+    context.user_data["review_desk"] = {"done": 0, "skipped": []}
+    return await _show_review_item(update, context)
+
+
+async def _show_review_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    desk = context.user_data.setdefault(
+        "review_desk", {"done": 0, "skipped": []}
+    )
+    item = await store.next_pending(
+        update.effective_user.id, skip=desk["skipped"]
+    )
+    if item is None:
+        # The store checks the credential too; belt and braces.
+        return await _show_menu(update, context, texts.REVIEW_NOT_ADMIN)
+    if not item.get("id"):
+        return await _close_review(update, context, desk)
+
+    lines = [texts.review_heading(item["id"], item["remaining"]), ""]
+    lines.append(item["summary"])
+    lines += item["details"]
+
+    rows: list[list[InlineKeyboardButton]] = []
+    match = item.get("match")
+    if match:
+        lines += [
+            "",
+            texts.review_match_line(
+                texts.tagged(match["label"], match["person_id"]),
+                ", ".join(match["reasons"]) or "same name",
+            ),
+        ]
+    if match and match["score"] >= 0.9:
+        # The duplicate guard would refuse a plain approve here anyway —
+        # lead with the two decisions that are actually on the table.
+        rows.append(
+            [_button(texts.REVIEW_MERGE,
+                     f"{CB_ADMIN}:mg:{item['id']}:{match['person_id']}")]
+        )
+        rows.append(
+            [_button(texts.REVIEW_FORCE, f"{CB_ADMIN}:force:{item['id']}")]
+        )
+    else:
+        rows.append(
+            [_button(texts.REVIEW_APPROVE, f"{CB_ADMIN}:ok:{item['id']}")]
+        )
+        if match:
+            rows.append(
+                [_button(texts.REVIEW_MERGE,
+                         f"{CB_ADMIN}:mg:{item['id']}:{match['person_id']}")]
+            )
+    rows.append([_button(texts.REVIEW_REJECT, f"{CB_ADMIN}:no:{item['id']}")])
+    rows.append([_button(texts.REVIEW_SKIP, f"{CB_ADMIN}:skip:{item['id']}")])
+    rows.append([_button(texts.REVIEW_STOP, f"{CB_ADMIN}:stop")])
+
+    await _say(update, "\n".join(lines), _kb(rows))
+    return REVIEW_DESK
+
+
+async def _close_review(update, context, desk) -> int:
+    if desk["done"]:
+        _refresh_published_chart()
+        lead = texts.review_done(desk["done"])
+    else:
+        lead = texts.REVIEW_QUEUE_CLEAR if not desk["skipped"] else (
+            texts.review_done(0)
+        )
+    context.user_data.pop("review_desk", None)
+    return await _show_menu(update, context, lead)
+
+
+def _refresh_published_chart() -> None:
+    """Fire-and-forget: the published chart follows every approval sitting.
+
+    Quietly does nothing where the publish command is absent (development,
+    tests) — the nightly refresh covers any gap."""
+    try:
+        import subprocess
+
+        subprocess.Popen(["/usr/local/bin/tree-publish"])
+    except Exception:
+        pass
+
+
+async def on_review_desk_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    desk = context.user_data.setdefault(
+        "review_desk", {"done": 0, "skipped": []}
+    )
+    parts = query.data.split(":")
+    action = parts[1]
+
+    if action == "stop":
+        return await _close_review(update, context, desk)
+
+    submission_id = int(parts[2])
+    if action == "skip":
+        desk["skipped"].append(submission_id)
+        return await _show_review_item(update, context)
+
+    problem = await store.admin_resolve(
+        update.effective_user.id,
+        submission_id,
+        {"ok": "approve", "force": "force", "mg": "merge", "no": "reject"}[action],
+        person_id=int(parts[3]) if action == "mg" else None,
+    )
+    if problem:
+        # Usually a dependency ("approve #X first"). Say it, set the item
+        # aside, keep going — the desk never gets stuck on one row.
+        await _say(update, problem)
+        desk["skipped"].append(submission_id)
+        return await _show_review_item(update, context)
+
+    desk["done"] += 1
+    return await _show_review_item(update, context)
 
 
 async def _start_correction(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -58,7 +58,10 @@ def build_conversation() -> ConversationHandler:
 
 def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[CommandHandler("start", handlers.start)],
+        entry_points=[
+            CommandHandler("start", handlers.start),
+            CommandHandler("review", handlers.on_review_command),
+        ],
         states={
             handlers.MENU: [
                 CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
@@ -146,10 +149,18 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 CallbackQueryHandler(handlers.on_pick_submission, pattern=r"^fix:"),
                 cancel_button,
             ],
+            handlers.REVIEW_DESK: [
+                CallbackQueryHandler(
+                    handlers.on_review_desk_button, pattern=r"^adm:"
+                ),
+                cancel_button,
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", handlers.cancel),
             CommandHandler("start", handlers.start),
+            # The admin's queue, from any state — the desk checks who asks.
+            CommandHandler("review", handlers.on_review_command),
             MessageHandler(TEXT_ANSWER, handlers.on_stray_text),
         ],
         # /start should always get you back to a working state, even from

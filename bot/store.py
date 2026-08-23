@@ -356,6 +356,107 @@ async def person_parents(person_id: int) -> list[str]:
     return await _run(_person_parents, person_id)
 
 
+# ---------------------------------------------------------------------------
+# The review desk, from a phone
+# ---------------------------------------------------------------------------
+#
+# The one sanctioned way the bot touches `people`: a super admin approving
+# through the same review functions the CLI and the web interface use. The
+# admin's Telegram ID is the credential, checked here at the boundary —
+# every function below answers None/refusal for anyone else.
+
+
+def _is_super_admin(telegram_user_id: int) -> bool:
+    return telegram_user_id in config.SUPER_ADMIN_TELEGRAM_IDS
+
+
+def _next_pending(
+    conn: sqlite3.Connection, telegram_user_id: int, skip: list[int]
+) -> dict[str, Any] | None:
+    if not _is_super_admin(telegram_user_id):
+        return None
+    import review
+
+    rows = [
+        row
+        for row in db.list_submissions(conn, status="pending")
+        if row["id"] not in set(skip)
+    ]
+    if not rows:
+        return {"remaining": 0}
+    row = rows[0]
+    payload = db.submission_payload(row)
+    match = None
+    for item in review.evidence(conn, payload, row["id"]):
+        if item["kind"] == "person":
+            match = {
+                "person_id": item["person_id"],
+                "label": item["label"],
+                "score": item["score"],
+                "reasons": list(item.get("reasons") or []),
+            }
+            break
+    return {
+        "remaining": len(rows),
+        "id": row["id"],
+        "summary": submissions.describe(payload),
+        "details": submissions.detail_lines(payload),
+        "match": match,
+    }
+
+
+async def next_pending(
+    telegram_user_id: int, skip: list[int] | None = None
+) -> dict[str, Any] | None:
+    """The oldest pending submission, with its strongest person match."""
+    return await _run(_next_pending, telegram_user_id, list(skip or []))
+
+
+def _admin_resolve(
+    conn: sqlite3.Connection,
+    telegram_user_id: int,
+    submission_id: int,
+    action: str,
+    person_id: int | None,
+) -> str | None:
+    """Apply one review decision. Returns a problem sentence, or None."""
+    if not _is_super_admin(telegram_user_id):
+        return texts.REVIEW_NOT_ADMIN
+    import review
+
+    try:
+        if action == "approve":
+            review.approve(conn, submission_id, telegram_user_id)
+        elif action == "force":
+            review.approve(conn, submission_id, telegram_user_id, force=True)
+        elif action == "merge":
+            review.approve(
+                conn, submission_id, telegram_user_id,
+                use_person_id=int(person_id),
+            )
+        elif action == "reject":
+            review.reject(
+                conn, submission_id, telegram_user_id,
+                note="rejected in the phone review",
+            )
+        else:
+            return f"unknown review action {action!r}"
+    except review.Blocked as blocked:
+        return str(blocked)
+    return None
+
+
+async def admin_resolve(
+    telegram_user_id: int,
+    submission_id: int,
+    action: str,
+    person_id: int | None = None,
+) -> str | None:
+    return await _run(
+        _admin_resolve, telegram_user_id, submission_id, action, person_id
+    )
+
+
 def _person_display(conn: sqlite3.Connection, person_id: int) -> str | None:
     row = db.get_person(conn, person_id)
     return db.display_name_with_also_known_as(row) if row else None

@@ -804,6 +804,79 @@ class NumberedNamesTests(BotTestCase):
         self.assertIn(f"(#{boutros})", chat.text)
 
 
+class PhoneReviewTests(BotTestCase):
+    """/review — approving from a phone, super admins only."""
+
+    def setUp(self):
+        super().setUp()
+        config.SUPER_ADMIN_TELEGRAM_IDS.append(5001)
+
+    def tearDown(self):
+        config.SUPER_ADMIN_TELEGRAM_IDS.remove(5001)
+        super().tearDown()
+
+    async def open_desk(self, chat):
+        from bot import handlers
+
+        chat.state = await handlers.on_review_command(
+            chat._update("/review"), chat.context
+        )
+        return chat.state
+
+    async def queue_a_child(self, chat, name="Rita"):
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap("0")   # sons
+        await chat.tap("1")   # daughters
+        await chat.say(name)
+        await chat.tap(texts.CONFIRM_CORRECT)
+
+    async def test_the_desk_is_for_admins_only(self):
+        chat = await self.identified_as_khalil(user_id=5002)
+        await self.open_desk(chat)
+        self.assertIn(texts.REVIEW_NOT_ADMIN, chat.text)
+
+    async def test_an_admin_approves_from_the_phone(self):
+        chat = await self.identified_as_khalil()
+        before = self.people_count()
+        await self.queue_a_child(chat)
+
+        await self.open_desk(chat)
+        self.assertIn("Reviewing #", chat.text)
+        await chat.tap(texts.REVIEW_APPROVE)
+
+        self.assertEqual(self.people_count(), before + 1)
+        self.assertEqual(self.queued()[-1]["status"], "approved")
+
+    async def test_a_duplicate_leads_with_the_merge_button(self):
+        chat = await self.identified_as_khalil()
+        # Mariam is already on the tree as Khalil's daughter; entering her
+        # again must offer "same person" first, not a plain approve.
+        await self.queue_a_child(chat, name="Mariam")
+
+        await self.open_desk(chat)
+        self.assertIn(texts.REVIEW_MERGE, chat.buttons)
+        before = self.people_count()
+        await chat.tap(texts.REVIEW_MERGE)
+
+        self.assertEqual(self.people_count(), before)
+        self.assertEqual(self.queued()[-1]["status"], "merged")
+
+    async def test_skip_leaves_it_pending(self):
+        chat = await self.identified_as_khalil()
+        await self.queue_a_child(chat)
+        await self.open_desk(chat)
+        await chat.tap(texts.REVIEW_SKIP)
+        self.assertEqual(self.queued()[-1]["status"], "pending")
+
+    async def test_reject_keeps_the_record(self):
+        chat = await self.identified_as_khalil()
+        await self.queue_a_child(chat)
+        await self.open_desk(chat)
+        await chat.tap(texts.REVIEW_REJECT)
+        record = self.queued()[-1]
+        self.assertEqual(record["status"], "rejected")
+
+
 class FixSomethingTests(BotTestCase):
     async def test_with_nothing_sent_the_tree_is_still_fixable(self):
         # No dead end: the tree itself can always be corrected, even by

@@ -604,6 +604,44 @@ FIX_SAVED = (
     "nothing changes on the tree until someone's had a look."
 )
 
+
+# --- the review desk --------------------------------------------------------
+#
+# Approving from a phone: /review walks an admin through the queue one item
+# at a time, with the evidence and the safe next moves as buttons.
+
+REVIEW_NOT_ADMIN = "The review desk is for the family's admins."
+
+
+def review_heading(item_id: int, remaining: int) -> str:
+    waiting = "1 waiting" if remaining == 1 else f"{remaining} waiting"
+    return f"Reviewing #{item_id} — {waiting}."
+
+
+def review_match_line(who: str, why: str) -> str:
+    return f"Looks like {who} — {why}."
+
+
+REVIEW_APPROVE = "✅ Approve — onto the tree"
+REVIEW_MERGE = "Same person — merge"
+REVIEW_FORCE = "Different person — add anyway"
+REVIEW_REJECT = "❌ Reject"
+REVIEW_SKIP = "Skip for now"
+REVIEW_STOP = "Stop reviewing"
+
+
+def review_done(count: int) -> str:
+    if not count:
+        return "Review closed — nothing changed."
+    handled = "1 item" if count == 1 else f"{count} items"
+    return (
+        f"Review closed — {handled} handled. "
+        f"The family link refreshes itself."
+    )
+
+
+REVIEW_QUEUE_CLEAR = "Nothing waiting — the queue is clear."
+
 FIX_THIS = "Something's wrong — fix it"
 FIX_BACK = "Back to the list"
 
