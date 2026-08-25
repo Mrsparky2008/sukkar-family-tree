@@ -1776,6 +1776,57 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
+class CornerReachTests(BotTestCase):
+    """How far "your corner of the tree" reaches.
+
+    Two generations either side: grandparents down to the children of
+    everyone in the contributor's own generation. Reaching two up and only
+    one down hid the nephews and nieces a contributor had just entered
+    themselves, from the very drawing they use to check their work.
+    """
+
+    def add_kin(self):
+        """A nephew for Khalil, and a cousin — neither is in the seed."""
+        conn = db.connect()
+        try:
+            nephew = db.create_person(
+                conn, "Elie", sex="M", father_id=self.ids["georges"]
+            )
+            cousin = db.create_person(
+                conn, "Rita", sex="F", father_id=self.ids["boutros"]
+            )
+            conn.commit()
+            return nephew, cousin
+        finally:
+            conn.close()
+
+    async def test_a_brothers_children_are_in_the_corner(self):
+        self.add_kin()
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_VIEW)
+        self.assertIn("Elie", chat.text, chat.text)
+
+    async def test_an_uncles_children_are_too(self):
+        self.add_kin()
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_VIEW)
+        self.assertIn("Rita", chat.text, chat.text)
+
+    async def test_they_hang_below_their_own_parent(self):
+        self.add_kin()
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_VIEW)
+        lines = chat.text.split("\n")
+        nephew = next(i for i, line in enumerate(lines) if "Elie" in line)
+        georges = next(i for i, line in enumerate(lines) if "Georges" in line)
+        self.assertGreater(nephew, georges, chat.text)
+        self.assertGreater(
+            len(lines[nephew]) - len(lines[nephew].lstrip("│ ")),
+            len(lines[georges]) - len(lines[georges].lstrip("│ ")),
+            chat.text,
+        )
+
+
 class HouseSignInTests(BotTestCase):
     """The house is asked once, at sign-in, and inherited by everyone after.
 

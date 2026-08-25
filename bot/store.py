@@ -986,6 +986,11 @@ def _approved_payloads(conn, telegram_user_id: int) -> list[dict]:
 
     Basket entries disappear once an admin approves them; without this the
     sketch would go blank at exactly the moment the data became real.
+
+    The corner reaches two generations either side of the contributor:
+    grandparents, their children, the contributor's own generation with
+    everyone they married, and the children of all of them. Beyond that is
+    the chart's job — a sketch is read on a phone.
     """
     contributor = db.get_contributor(conn, telegram_user_id)
     if contributor is None or contributor["linked_person_id"] is None:
@@ -1037,6 +1042,10 @@ def _approved_payloads(conn, telegram_user_id: int) -> list[dict]:
                 {"kind": submissions.ADD_SPOUSE,
                  "about": {"label": label}, "people": [entry]}
             )
+        children_of(row)
+
+    def children_of(row) -> None:
+        label = about_label(row)
         for child in db.get_children(conn, row["id"]):
             entry = _sketchable(child)
             entry["role"] = submissions.CHILD
@@ -1048,6 +1057,22 @@ def _approved_payloads(conn, telegram_user_id: int) -> list[dict]:
     family_of(me)
     for parent in db.get_parents(conn, me["id"]):
         family_of(parent)
+
+    # Then one step down from everyone alongside: nephews and nieces, and
+    # cousins. Without this the drawing reached two generations up and only
+    # one down, so a contributor's own brother's children — often the last
+    # thing they entered — were missing from the picture they use to check
+    # their work. Spouses are already recorded by the walk above, so a child
+    # lands under the couple rather than under a lone parent.
+    alongside = list(db.get_siblings(conn, me["id"]))
+    for parent in db.get_parents(conn, me["id"]):
+        alongside += db.get_siblings(conn, parent["id"])
+    seen: set[int] = {me["id"]}
+    for relative in alongside:
+        if relative["id"] in seen:
+            continue
+        seen.add(relative["id"])
+        children_of(relative)
     return payloads
 
 
