@@ -1239,3 +1239,120 @@ class ProvenanceTests(ReviewTestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class HouseAtTheTopOfTheLineTests(ReviewTestCase):
+    """A house is stated, not worked out.
+
+    The men the houses are named after are further back than anything this
+    tree records, so nothing can derive them. Somebody says it once, as high
+    up a line as they can vouch for, and it runs downward from there. Saying
+    it on a grandson leaves his uncles out; saying it on the grandfather is
+    the point of having the command.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.grandfather = db.create_person(self.conn, "Sarkis", sex="M")
+        self.father = db.create_person(
+            self.conn, "Toufic", sex="M", father_id=self.grandfather
+        )
+        self.uncle = db.create_person(
+            self.conn, "Lichaa", sex="M", father_id=self.grandfather
+        )
+        self.cousin = db.create_person(
+            self.conn, "Fadi", sex="M", father_id=self.uncle
+        )
+        self.house = config.HOUSES[0]["key"]
+
+    def house_of(self, person_id):
+        row = self.conn.execute(
+            "SELECT b.key FROM people p LEFT JOIN branches b ON b.id = p.branch_id"
+            " WHERE p.id = ?",
+            (person_id,),
+        ).fetchone()
+        return row["key"]
+
+    def test_the_whole_line_below_him_takes_it(self):
+        review.declare_house(self.conn, self.grandfather, self.house)
+        for person in (self.grandfather, self.father, self.uncle, self.cousin):
+            self.assertEqual(self.house_of(person), self.house)
+
+    def test_it_is_a_declaration_not_a_guess(self):
+        review.declare_house(self.conn, self.grandfather, self.house)
+        self.assertEqual(
+            db.get_person(self.conn, self.grandfather)["branch_declared"], 1
+        )
+        self.assertEqual(
+            db.get_person(self.conn, self.cousin)["branch_declared"], 0
+        )
+
+    def test_a_house_nobody_configured_is_refused_with_the_list(self):
+        with self.assertRaises(review.Blocked) as caught:
+            review.declare_house(self.conn, self.grandfather, "nowhere")
+        self.assertIn(self.house, str(caught.exception))
+
+    def test_a_number_nobody_has_is_refused(self):
+        with self.assertRaises(review.Blocked):
+            review.declare_house(self.conn, 99999, self.house)
+
+
+class FoldingADoubleEntryTests(ReviewTestCase):
+    """The same person, entered twice, ends up with two numbers.
+
+    Folding keeps one number and retires the other. It is only safe while
+    the spare copy is still bare — anything hung off it has to be moved by
+    somebody looking at both, not by a DELETE.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.father = db.create_person(self.conn, "Lichaa", sex="M")
+        self.keep = db.create_person(
+            self.conn, "Joseph", sex="M", father_id=self.father
+        )
+        self.spare = db.create_person(
+            self.conn, "Joseph", sex="M", father_id=self.father
+        )
+
+    def test_the_spare_number_goes_and_the_kept_one_stays(self):
+        review.fold(self.conn, self.spare, self.keep)
+        self.assertIsNone(db.get_person(self.conn, self.spare))
+        self.assertIsNotNone(db.get_person(self.conn, self.keep))
+
+    def test_the_retired_number_is_never_handed_out_again(self):
+        review.fold(self.conn, self.spare, self.keep)
+        fresh = db.create_person(self.conn, "Waleed", sex="M")
+        self.assertGreater(fresh, self.spare)
+
+    def test_the_submission_behind_it_now_points_at_the_kept_person(self):
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Joseph", sex="M")],
+            S.subject(person_id=self.father, label="Lichaa"),
+        )
+        db.resolve_submission(
+            self.conn, sid, "approved", reviewed_by=1, resulting_person_id=self.spare
+        )
+        review.fold(self.conn, self.spare, self.keep)
+        row = db.get_submission(self.conn, sid)
+        self.assertEqual(row["status"], "merged")
+        self.assertEqual(row["resulting_person_id"], self.keep)
+
+    def test_a_copy_with_children_on_it_is_refused(self):
+        db.create_person(self.conn, "Rita", sex="F", father_id=self.spare)
+        with self.assertRaises(review.Blocked) as caught:
+            review.fold(self.conn, self.spare, self.keep)
+        self.assertIn("children", str(caught.exception))
+        self.assertIsNotNone(db.get_person(self.conn, self.spare))
+
+    def test_a_copy_somebody_signed_in_as_is_refused(self):
+        db.upsert_contributor(self.conn, 9100, linked_person_id=self.spare)
+        with self.assertRaises(review.Blocked) as caught:
+            review.fold(self.conn, self.spare, self.keep)
+        self.assertIn("signed in", str(caught.exception))
+        self.assertIsNotNone(db.get_person(self.conn, self.spare))
+
+    def test_folding_somebody_into_themselves_is_refused(self):
+        with self.assertRaises(review.Blocked):
+            review.fold(self.conn, self.keep, self.keep)

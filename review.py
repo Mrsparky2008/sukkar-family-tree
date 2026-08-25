@@ -14,6 +14,8 @@ automatically.
     python review.py --merge 4 --into 12 # it is person 12, already in the tree
     python review.py --reject 4 --note "not a relative"
     python review.py --tree              # what the family looks like now
+    python review.py --house 96 --is atrash  # and everyone below him
+    python review.py --fold 108 --into 105   # one person, entered twice
 """
 
 from __future__ import annotations
@@ -508,6 +510,93 @@ def show_one(conn: sqlite3.Connection, submission_id: int) -> None:
     print()
 
 
+def declare_house(
+    conn: sqlite3.Connection, person_id: int, house_key: str
+) -> int:
+    """Pin somebody's house, and let everyone below on the father chain take it.
+
+    A house is not something the system can work out on its own — the men it
+    is named after are further back than anything recorded here. So it is
+    stated once, as high up a line as somebody can vouch for, and inherited
+    downward from there. Stating it on a grandfather rather than a grandson
+    is the whole point: his brothers and their children get it too.
+
+    Returns how many people changed house as a result.
+    """
+    person = db.get_person(conn, person_id)
+    if person is None:
+        raise Blocked(f"there is no person #{person_id}")
+    if not db.declare_house(conn, person_id, house_key):
+        known = ", ".join(row["key"] for row in db.get_branches(conn))
+        raise Blocked(f"no house called {house_key!r} — there is: {known}")
+    return db.assign_branches(conn)
+
+
+def fold(conn: sqlite3.Connection, person_id: int, into_id: int) -> None:
+    """One person entered twice: keep one number, retire the other.
+
+    Only ever for a genuine double entry — the same person reaching the tree
+    down two paths — and only while the spare copy is still bare. If anything
+    has been hung off it since, that has to be moved first, deliberately, by
+    somebody looking at both. Refusing here is cheaper than silently
+    reparenting a child onto the wrong number.
+
+    The retired number is not reused. It stays spent, so a reference to it
+    written down anywhere never quietly means somebody else.
+    """
+    if person_id == into_id:
+        raise Blocked("those are the same number")
+    spare = db.get_person(conn, person_id)
+    keeper = db.get_person(conn, into_id)
+    if spare is None:
+        raise Blocked(f"there is no person #{person_id}")
+    if keeper is None:
+        raise Blocked(f"there is no person #{into_id}")
+
+    children = conn.execute(
+        "SELECT id FROM people WHERE father_id = ?1 OR mother_id = ?1",
+        (person_id,),
+    ).fetchall()
+    if children:
+        listed = ", ".join(f"#{row['id']}" for row in children)
+        raise Blocked(
+            f"#{person_id} has children on it ({listed}) — move them to"
+            f" #{into_id} first, then fold"
+        )
+    partners = conn.execute(
+        "SELECT id FROM unions WHERE partner_a_id = ?1 OR partner_b_id = ?1",
+        (person_id,),
+    ).fetchall()
+    if partners:
+        raise Blocked(
+            f"#{person_id} has a marriage recorded on it — move it to"
+            f" #{into_id} first, then fold"
+        )
+    signed_in = conn.execute(
+        "SELECT telegram_user_id FROM contributors WHERE linked_person_id = ?",
+        (person_id,),
+    ).fetchall()
+    if signed_in:
+        raise Blocked(
+            f"somebody signed in as #{person_id} — point them at #{into_id}"
+            " first, then fold"
+        )
+    if conn.execute(
+        "SELECT 1 FROM branches WHERE founding_ancestor_id = ?", (person_id,)
+    ).fetchone():
+        raise Blocked(f"#{person_id} is a founding ancestor of a branch")
+
+    note = f"same as #{into_id} — entered twice"
+    conn.execute(
+        "UPDATE submissions SET status = 'merged', resulting_person_id = ?1,"
+        " review_note = COALESCE(review_note, ?2)"
+        " WHERE resulting_person_id = ?3 OR matched_person_id = ?3",
+        (into_id, note, person_id),
+    )
+    conn.execute("DELETE FROM people WHERE id = ?", (person_id,))
+    conn.commit()
+
+
 def show_spellings(conn: sqlite3.Connection) -> None:
     """Where each spelling of the family name starts, and who inherited it.
 
@@ -730,6 +819,12 @@ def main(argv: list[str] | None = None) -> int:
                         help="write everything out as plain JSON")
     parser.add_argument("--spellings", action="store_true",
                         help="where each spelling of the family name split off")
+    parser.add_argument("--house", type=int, metavar="PERSON_ID",
+                        help="say which house somebody belongs to")
+    parser.add_argument("--is", dest="house_key", metavar="HOUSE",
+                        help="the house, for --house")
+    parser.add_argument("--fold", type=int, metavar="PERSON_ID",
+                        help="retire a double entry; needs --into")
     parser.add_argument("--as", dest="reviewer", type=int, default=0,
                         help="your Telegram id, for the audit trail")
     parser.add_argument("--db")
@@ -748,6 +843,20 @@ def main(argv: list[str] | None = None) -> int:
             show_person(conn, args.who)
         elif args.spellings:
             show_spellings(conn)
+        elif args.house is not None:
+            if not args.house_key:
+                print("--house needs --is HOUSE", file=sys.stderr)
+                return 1
+            moved = declare_house(conn, args.house, args.house_key)
+            conn.commit()
+            who = db.row_display_name(db.get_person(conn, args.house))
+            print(f"#{args.house} {who} is {args.house_key}; {moved} follow")
+        elif args.fold is not None:
+            if args.into is None:
+                print("--fold needs --into PERSON_ID", file=sys.stderr)
+                return 1
+            fold(conn, args.fold, args.into)
+            print(f"#{args.fold} retired; they are #{args.into}")
         elif args.tree:
             show_tree(conn)
         elif args.show is not None:
