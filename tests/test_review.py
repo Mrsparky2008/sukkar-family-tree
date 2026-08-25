@@ -141,6 +141,53 @@ class ApprovalTests(ReviewTestCase):
         self.assertIsNotNone(row["resulting_person_id"])
 
 
+class MothersHaveProvenanceTests(ReviewTestCase):
+    """Who said she existed.
+
+    A decision records one resulting person, but "add my parents" produces
+    two — so the mother of every pair had no provenance at all. On a live
+    tree that fell entirely on the women: nine of them, every one added as
+    somebody's mother, on an archive whose whole point is remembering who
+    told it what.
+    """
+
+    def add_parents(self, child_id, father="Tanios", mother="Zeina"):
+        sid = self.queue(
+            S.ADD_PARENTS,
+            [
+                S.person(S.FATHER, father, sex="M"),
+                S.person(S.MOTHER, mother, sex="F", family_name="Taouk"),
+            ],
+            S.subject(person_id=child_id, label="child"),
+        )
+        review.approve(self.conn, sid, reviewed_by=1, force=True)
+        return sid
+
+    def person_named(self, name):
+        return [r for r in db.get_people(self.conn) if r["given_name"] == name][0]
+
+    def test_the_mother_of_a_pair_is_traceable(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        sid = self.add_parents(child)
+        mother = self.person_named("Zeina")
+
+        claims = db.provenance(self.conn, mother["id"])
+        self.assertTrue(claims, "nobody is on record as having named her")
+
+    def test_the_father_is_still_traceable(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        self.add_parents(child)
+        father = self.person_named("Tanios")
+        self.assertTrue(db.provenance(self.conn, father["id"]))
+
+    def test_her_spelling_is_on_the_record_too(self):
+        child = db.create_person(self.conn, "Sami", sex="M")
+        self.add_parents(child)
+        mother = self.person_named("Zeina")
+        spellings = {c["spelling"] for c in db.spelling_claims(self.conn, mother["id"])}
+        self.assertIn("Taouk", spellings)
+
+
 class OrphanedAnchorTests(ReviewTestCase):
     """A submission about "themselves" that points at nobody.
 

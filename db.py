@@ -1421,9 +1421,22 @@ def provenance(conn: sqlite3.Connection, person_id: int) -> list[dict[str, Any]]
     """
     claims: list[dict[str, Any]] = []
 
+    # Two ways a submission speaks about somebody. `resulting_person_id`
+    # records what a decision produced — but only one person per decision,
+    # and "add my parents" produces two. The mother of every such pair had
+    # no provenance at all: nothing about who said she existed, on a tree
+    # whose whole point is that the record remembers who told it what.
+    # `from_submission_id` on the person closes that.
+    origin = conn.execute(
+        "SELECT from_submission_id FROM people WHERE id = ?", (person_id,)
+    ).fetchone()
+    origin_id = origin["from_submission_id"] if origin else None
+
     for row in conn.execute(
-        "SELECT * FROM submissions WHERE resulting_person_id = ? ORDER BY id",
-        (person_id,),
+        "SELECT * FROM submissions"
+        " WHERE resulting_person_id = ?1 OR (?2 IS NOT NULL AND id = ?2)"
+        " ORDER BY id",
+        (person_id, origin_id),
     ):
         payload = submission_payload(row)
         teller = payload.get("submitted_by") or {}
