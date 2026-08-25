@@ -1113,11 +1113,14 @@ def find_probable_matches(
 def _relatives_of(conn: sqlite3.Connection, person_id: int) -> dict[str, Any]:
     """The facts about a person that a second submitter could corroborate."""
     row = conn.execute(
-        "SELECT id, father_id, mother_id FROM people WHERE id = ?", (person_id,)
+        "SELECT id, sex, father_id, mother_id FROM people WHERE id = ?",
+        (person_id,),
     ).fetchone()
     if row is None:
         return {}
     return {
+        "id": row["id"],
+        "sex": row["sex"],
         "father_id": row["father_id"],
         "mother_id": row["mother_id"],
         "partner_ids": {p["id"] for p in get_partners(conn, person_id)},
@@ -1156,6 +1159,65 @@ def _relational_reasons(
             reasons.append("already recorded as their spouse")
 
     return reasons
+
+
+def _parent_name(conn: sqlite3.Connection, person_id: int | None) -> str | None:
+    if not person_id:
+        return None
+    row = conn.execute(
+        "SELECT given_name FROM people WHERE id = ?", (person_id,)
+    ).fetchone()
+    return row["given_name"] if row else None
+
+
+def _relational_objections(
+    conn: sqlite3.Connection,
+    candidate: sqlite3.Row,
+    role: str,
+    subject_id: int,
+    subject: dict[str, Any],
+) -> list[str]:
+    """Why this candidate is probably NOT the person being described.
+
+    Corroboration on its own is half an answer. Two men named Joseph, one
+    the son of Metanios and one the son of Lichaa, agree on everything the
+    scorer looks at and disagree on the only thing that matters. Saying
+    "same name" and stopping there invites exactly the wrong tap, so the
+    disagreement gets found and said out loud in the same breath.
+
+    A missing fact is never an objection — most of this tree is missing
+    facts. Only two recorded facts that cannot both be true count.
+    """
+    objections: list[str] = []
+
+    def clash(recorded_id: int | None, expected_id: int | None, word: str) -> None:
+        if recorded_id and expected_id and recorded_id != expected_id:
+            name = _parent_name(conn, recorded_id)
+            objections.append(
+                f"their {word} is recorded as {name}" if name
+                else f"a different {word} is recorded"
+            )
+
+    if role == "child":
+        # The subject is the parent being claimed. Which slot depends on who
+        # they are; with their sex unrecorded, either slot already filled by
+        # somebody else is the disagreement.
+        if subject.get("sex") == "M":
+            clash(candidate["father_id"], subject_id, "father")
+        elif subject.get("sex") == "F":
+            clash(candidate["mother_id"], subject_id, "mother")
+        else:
+            clash(candidate["father_id"], subject_id, "father")
+            clash(candidate["mother_id"], subject_id, "mother")
+    elif role == "sibling":
+        clash(candidate["father_id"], subject.get("father_id"), "father")
+        clash(candidate["mother_id"], subject.get("mother_id"), "mother")
+    elif role == "father":
+        clash(subject.get("father_id"), candidate["id"], "father")
+    elif role == "mother":
+        clash(subject.get("mother_id"), candidate["id"], "mother")
+
+    return objections
 
 
 def name_sex_hint(conn: sqlite3.Connection, given_name: str) -> str | None:
@@ -1233,9 +1295,13 @@ def corroborate(
             if name_similarity(father_given_name, row["father_given_name"]) >= 0.85:
                 reasons.append(f"father also given as {row['father_given_name']}")
 
+        objections: list[str] = []
         if subject and role:
             reasons.extend(
                 _relational_reasons(conn, row, role, subject_person_id, subject)
+            )
+            objections = _relational_objections(
+                conn, row, role, subject_person_id, subject
             )
 
         if reasons:
@@ -1263,6 +1329,7 @@ def corroborate(
                     "label": row_display_name(row),
                     "score": round(score, 3),
                     "reasons": reasons,
+                    "objections": objections,
                 }
             )
 
@@ -1318,11 +1385,28 @@ def corroborate(
                         "label": submission_person_label(entry),
                         "score": round(score, 3),
                         "reasons": reasons,
+                        "objections": [],
                         "submitted_by": row["telegram_user_id"],
                     }
                 )
 
-    results.sort(key=lambda match: match["score"], reverse=True)
+    def rank(match: dict[str, Any]) -> tuple[int, float]:
+        """Something that agrees beats a name; a name beats a name that clashes.
+
+        Scores tie constantly here — two people called Joseph both score 1.0
+        on the name — and whoever the tie handed first place to was the one
+        the review desk offered. So the evidence decides the order, and the
+        score only settles ties within the same kind of evidence.
+        """
+        if match["reasons"]:
+            standing = 2
+        elif match.get("objections"):
+            standing = 0
+        else:
+            standing = 1
+        return (standing, match["score"])
+
+    results.sort(key=rank, reverse=True)
     return results
 
 

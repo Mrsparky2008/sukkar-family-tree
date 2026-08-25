@@ -579,6 +579,7 @@ def _next_pending(
                 "label": item["label"],
                 "score": item["score"],
                 "reasons": list(item.get("reasons") or []),
+                "objections": list(item.get("objections") or []),
             }
             break
     checks = []

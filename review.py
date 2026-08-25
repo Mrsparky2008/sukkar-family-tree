@@ -443,12 +443,26 @@ def evidence(
     if entry is None:
         return []
     about = payload.get("about") or {}
+
+    # Who this claim hangs off, resolved the same way approving it would.
+    # Most claims arrive anchored to another submission rather than to a
+    # person — a contributor adds a brother and then that brother's children
+    # without waiting for anyone. Once the anchor is approved it IS a person,
+    # and reading the anchor literally instead of resolving it left the desk
+    # with no subject at all: no relative to agree with, none to disagree
+    # with, and nothing to go on but the given name. That is how one person
+    # gets onto the tree twice.
+    try:
+        subject_person_id = resolve_subject(conn, payload)
+    except Blocked:
+        subject_person_id = about.get("person_id")
+
     return db.corroborate(
         conn,
         entry["given_name"],
         role=entry.get("role"),
         family_name=entry.get("family_name"),
-        subject_person_id=about.get("person_id"),
+        subject_person_id=subject_person_id,
         subject_submission_id=about.get("submission_id"),
         father_given_name=entry.get("father_given_name"),
         exclude_submission_id=submission_id,
@@ -475,10 +489,13 @@ def show_queue(conn: sqlite3.Connection, status: str | None) -> None:
         for match in evidence(conn, payload, row['id'])[:3]:
             where = "in the tree" if match["kind"] == "person" else "also submitted"
             why = ", ".join(match["reasons"]) or "name only"
-            marker = "  <-- likely" if match["score"] >= 0.9 else ""
+            against = ", ".join(match.get("objections") or [])
+            marker = "  <-- likely" if match["score"] >= 0.9 and not against else ""
             print(
                 f"      ? {match['label']} ({where}, {match['score']}) — {why}{marker}"
             )
+            if against:
+                print(f"          but {against}")
         print()
 
 
@@ -505,6 +522,8 @@ def show_one(conn: sqlite3.Connection, submission_id: int) -> None:
     for match in evidence(conn, payload, row['id']):
         why = ", ".join(match["reasons"]) or "name only"
         print(f"  ? {match['label']} ({match['kind']}, {match['score']}) — {why}")
+        for against in match.get("objections") or []:
+            print(f"      but {against}")
     if row["resulting_person_id"]:
         show_spelling_claims(conn, row["resulting_person_id"])
     print()

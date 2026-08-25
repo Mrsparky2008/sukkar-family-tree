@@ -2868,18 +2868,21 @@ async def _show_review_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
             texts.review_match_line(
                 texts.tagged(match["label"], match["person_id"]),
                 ", ".join(match["reasons"]) or "same name",
+                ", ".join(match.get("objections") or []) or None,
             ),
         ]
     if match and match["score"] >= 0.9:
         # The duplicate guard would refuse a plain approve here anyway —
-        # lead with the two decisions that are actually on the table.
-        rows.append(
-            [_button(texts.REVIEW_MERGE,
-                     f"{CB_ADMIN}:mg:{item['id']}:{match['person_id']}")]
+        # lead with the two decisions that are actually on the table, and
+        # lead with the likelier one: a candidate whose father is somebody
+        # else is a namesake, so "different person" goes first or the
+        # ordering is quietly arguing for the wrong tap.
+        merge = _button(
+            texts.REVIEW_MERGE, f"{CB_ADMIN}:mg:{item['id']}:{match['person_id']}"
         )
-        rows.append(
-            [_button(texts.REVIEW_FORCE, f"{CB_ADMIN}:force:{item['id']}")]
-        )
+        separate = _button(texts.REVIEW_FORCE, f"{CB_ADMIN}:force:{item['id']}")
+        pair = [separate, merge] if match.get("objections") else [merge, separate]
+        rows.extend([button] for button in pair)
     else:
         rows.append(
             [_button(texts.REVIEW_APPROVE, f"{CB_ADMIN}:ok:{item['id']}")]

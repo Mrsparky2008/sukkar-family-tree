@@ -1356,3 +1356,159 @@ class FoldingADoubleEntryTests(ReviewTestCase):
     def test_folding_somebody_into_themselves_is_refused(self):
         with self.assertRaises(review.Blocked):
             review.fold(self.conn, self.keep, self.keep)
+
+
+class NamesakesAreNotMatchesTests(ReviewTestCase):
+    """Joseph son of Metanios is not Joseph son of Lichaa.
+
+    The scorer used to look at the given name, find nothing relational to
+    say, and offer "same name" — which reads like the system has decided
+    something. A shared given name is the weakest fact in this family. Two
+    recorded fathers that cannot both be true is a real one, and it has to
+    be said in the same breath as the match.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.metanios = db.create_person(self.conn, "Metanios", sex="M")
+        self.lichaa = db.create_person(self.conn, "Lichaa", sex="M")
+        self.other_joseph = db.create_person(
+            self.conn, "Joseph", sex="M", father_id=self.metanios
+        )
+
+    def claim(self):
+        return self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Joseph", sex="M")],
+            S.subject(person_id=self.lichaa, label="Lichaa"),
+        )
+
+    def matches(self):
+        sid = self.claim()
+        row = db.get_submission(self.conn, sid)
+        return review.evidence(self.conn, db.submission_payload(row), sid)
+
+    def test_the_clash_of_fathers_is_reported(self):
+        found = [
+            m for m in self.matches() if m.get("person_id") == self.other_joseph
+        ]
+        self.assertTrue(found, "the namesake should still be offered")
+        self.assertTrue(found[0]["objections"])
+        self.assertIn("Metanios", found[0]["objections"][0])
+
+    def test_a_clashing_namesake_never_leads_the_list(self):
+        matches = self.matches()
+        clashing = [i for i, m in enumerate(matches) if m.get("objections")]
+        clean = [i for i, m in enumerate(matches) if not m.get("objections")]
+        if clashing and clean:
+            self.assertGreater(min(clashing), max(clean))
+
+    def test_a_missing_father_is_not_a_clash(self):
+        nobodys_son = db.create_person(self.conn, "Waleed", sex="M")
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Waleed", sex="M")],
+            S.subject(person_id=self.lichaa, label="Lichaa"),
+        )
+        row = db.get_submission(self.conn, sid)
+        found = [
+            m
+            for m in review.evidence(self.conn, db.submission_payload(row), sid)
+            if m.get("person_id") == nobodys_son
+        ]
+        self.assertTrue(found)
+        self.assertFalse(found[0]["objections"])
+
+    def test_the_real_son_wins_over_the_namesake(self):
+        # This is how the same person ended up on the tree twice: the two
+        # Josephs tie at 1.0 on the name, the desk shows whichever came
+        # first, and the one already recorded as Lichaa's son lost the tie.
+        already = db.create_person(
+            self.conn, "Joseph", sex="M", father_id=self.lichaa
+        )
+        top = self.matches()[0]
+        self.assertEqual(top["person_id"], already)
+        self.assertIn("already recorded as their child", top["reasons"])
+
+    def test_a_sibling_with_a_different_father_clashes_too(self):
+        brother = db.create_person(
+            self.conn, "Fadi", sex="M", father_id=self.lichaa
+        )
+        db.create_person(self.conn, "Fadi", sex="M", father_id=self.metanios)
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Fadi", sex="M")],
+            S.subject(person_id=brother, label="Fadi"),
+        )
+        row = db.get_submission(self.conn, sid)
+        found = review.evidence(self.conn, db.submission_payload(row), sid)
+        clashing = [m for m in found if m.get("objections")]
+        self.assertTrue(clashing)
+        self.assertIn("Metanios", clashing[0]["objections"][0])
+
+
+class EvidenceResolvesItsAnchorTests(ReviewTestCase):
+    """A claim hung off another claim still has a subject.
+
+    Almost nothing arrives anchored to a person. A contributor names a
+    brother, then that brother's children, without waiting for anyone — so
+    the anchor is a submission id, and it becomes a person only when it is
+    approved. Reading the anchor literally left the desk with no subject:
+    nothing to corroborate against, nothing to contradict, and a match list
+    built from the given name alone.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.metanios = db.create_person(self.conn, "Metanios", sex="M")
+        db.create_person(self.conn, "Joseph", sex="M", father_id=self.metanios)
+        root = db.create_person(self.conn, "Sarkis", sex="M")
+        self.anchor = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Lichaa", sex="M")],
+            S.subject(person_id=root, label="Sarkis"),
+        )
+        review.approve(self.conn, self.anchor, reviewed_by=1)
+        self.lichaa = db.get_submission(self.conn, self.anchor)["resulting_person_id"]
+
+    def child_claim(self):
+        return self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Joseph", sex="M")],
+            S.subject(submission_id=self.anchor, label="Lichaa"),
+        )
+
+    def test_the_namesake_is_marked_as_a_clash(self):
+        sid = self.child_claim()
+        row = db.get_submission(self.conn, sid)
+        found = review.evidence(self.conn, db.submission_payload(row), sid)
+        namesakes = [m for m in found if m["kind"] == "person"]
+        self.assertTrue(namesakes)
+        self.assertTrue(
+            any(m["objections"] for m in namesakes),
+            "a Joseph with a different father should read as a clash",
+        )
+
+    def test_the_child_already_recorded_leads_the_list(self):
+        already = db.create_person(
+            self.conn, "Joseph", sex="M", father_id=self.lichaa
+        )
+        sid = self.child_claim()
+        row = db.get_submission(self.conn, sid)
+        top = review.evidence(self.conn, db.submission_payload(row), sid)[0]
+        self.assertEqual(top["person_id"], already)
+        self.assertIn("already recorded as their child", top["reasons"])
+
+    def test_an_anchor_still_waiting_does_not_crash_the_desk(self):
+        pending = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Raffoul", sex="M")],
+            S.subject(person_id=self.lichaa, label="Lichaa"),
+        )
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Charbel", sex="M")],
+            S.subject(submission_id=pending, label="Raffoul"),
+        )
+        row = db.get_submission(self.conn, sid)
+        review.evidence(self.conn, db.submission_payload(row), sid)

@@ -684,7 +684,15 @@ def review_heading(item_id: int, remaining: int) -> str:
     return f"Reviewing #{item_id} — {waiting}."
 
 
-def review_match_line(who: str, why: str) -> str:
+def review_match_line(who: str, why: str, against: str | None = None) -> str:
+    """What we found, and — just as importantly — what does not fit.
+
+    "Same name" on its own reads like the system has decided, when a shared
+    given name is the weakest thing this family has. Saying the mismatch in
+    the same sentence is what lets an admin answer without opening the tree.
+    """
+    if against:
+        return f"Might be {who} — {why}. But {against}."
     return f"Looks like {who} — {why}."
 
 
