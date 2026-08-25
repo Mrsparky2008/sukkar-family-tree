@@ -123,6 +123,15 @@ def _create(
 # ---------------------------------------------------------------------------
 
 
+def _approval_note(edits, unknown_house: str | None) -> str | None:
+    parts = []
+    if edits:
+        parts.append("approved with edits")
+    if unknown_house:
+        parts.append(f"house not configured: {unknown_house!r}")
+    return "; ".join(parts) or None
+
+
 def approve(
     conn: sqlite3.Connection,
     submission_id: int,
@@ -184,6 +193,7 @@ def approve(
     subject_id = resolve_subject(conn, payload)
     created: list[int] = []
     primary: int | None = None
+    unknown_house: str | None = None
     entries = payload.get("people") or []
 
     def place(entry, is_primary: bool) -> int:
@@ -202,6 +212,12 @@ def approve(
                 # They answered for themselves, which outranks any relative's
                 # guess already on the record.
                 db.set_family_name(conn, primary, spelling, self_reported=True)
+            house = entries[0].get("house")
+            if house and not db.declare_house(conn, primary, house):
+                # A house nobody has configured. The claim stays on the
+                # record either way; the admin either adds the house or
+                # decides it is a spelling of one already listed.
+                unknown_house = house
             db.upsert_contributor(
                 conn,
                 payload["submitted_by"]["telegram_user_id"],
@@ -285,7 +301,7 @@ def approve(
             resulting_person_id=primary,
             review_note=(
                 f"same as #{use_person_id}" if use_person_id is not None
-                else ("approved with edits" if edits else None)
+                else _approval_note(edits, unknown_house)
             ),
         )
         db.assign_branches(conn)

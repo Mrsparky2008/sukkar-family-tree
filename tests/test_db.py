@@ -234,7 +234,9 @@ class BranchTests(unittest.TestCase):
 
     def test_branches_come_from_config(self):
         keys = {row["key"] for row in db.get_branches(self.conn)}
-        self.assertEqual(keys, {entry["key"] for entry in config.FOUNDING_ANCESTORS})
+        configured = {entry["key"] for entry in config.FOUNDING_ANCESTORS}
+        configured |= {entry["key"] for entry in config.HOUSES}
+        self.assertEqual(keys, configured)
 
     def test_sync_branches_updates_rather_than_duplicates(self):
         before = len(db.get_branches(self.conn))
@@ -621,3 +623,65 @@ def load_tests(loader, tests, ignore):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class HouseTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = db.connect(":memory:")
+        db.init_db(self.conn)
+        db.sync_branches(self.conn)
+
+    def tearDown(self):
+        self.conn.close()
+
+    """Houses: declared by someone who knows, inherited down the patriline.
+
+    The ancestor a house is named for is normally too far back to be in the
+    tree, so descent cannot establish membership on its own.
+    """
+
+    def house_key(self, position: int = 0) -> str:
+        return config.HOUSES[position]["key"]
+
+    def test_a_declaration_flows_down_the_father_chain(self):
+        grandfather = db.create_person(self.conn, "Tanios", sex="M")
+        father = db.create_person(self.conn, "Sami", sex="M", father_id=grandfather)
+        son = db.create_person(self.conn, "Fares", sex="M", father_id=father)
+
+        self.assertTrue(db.declare_house(self.conn, grandfather, self.house_key()))
+        db.assign_branches(self.conn)
+
+        branch = db.get_branch_by_key(self.conn, self.house_key())["id"]
+        for person_id in (grandfather, father, son):
+            self.assertEqual(db.get_person(self.conn, person_id)["branch_id"], branch)
+
+    def test_a_declaration_is_never_overwritten_by_descent(self):
+        # A son who says he belongs to another house keeps it, and his own
+        # children follow him rather than his father.
+        father = db.create_person(self.conn, "Tanios", sex="M")
+        son = db.create_person(self.conn, "Sami", sex="M", father_id=father)
+        grandson = db.create_person(self.conn, "Fares", sex="M", father_id=son)
+
+        db.declare_house(self.conn, father, self.house_key(0))
+        db.declare_house(self.conn, son, self.house_key(1))
+        db.assign_branches(self.conn)
+
+        second = db.get_branch_by_key(self.conn, self.house_key(1))["id"]
+        self.assertEqual(db.get_person(self.conn, son)["branch_id"], second)
+        self.assertEqual(db.get_person(self.conn, grandson)["branch_id"], second)
+
+    def test_a_house_nobody_configured_is_refused_rather_than_guessed(self):
+        person = db.create_person(self.conn, "Sami", sex="M")
+        self.assertFalse(db.declare_house(self.conn, person, "no-such-house"))
+        self.assertIsNone(db.get_person(self.conn, person)["branch_id"])
+
+    def test_marrying_in_borrows_the_house_without_claiming_it(self):
+        husband = db.create_person(self.conn, "Sami", sex="M")
+        wife = db.create_person(self.conn, "Rima", sex="F", family_name="Taouk")
+        db.create_union(self.conn, husband, wife)
+        db.declare_house(self.conn, husband, self.house_key())
+        db.assign_branches(self.conn)
+
+        row = db.get_person(self.conn, wife)
+        self.assertEqual(row["branch_id"], db.get_person(self.conn, husband)["branch_id"])
+        self.assertEqual(row["branch_declared"], 0, "borrowed, not hers by birth")

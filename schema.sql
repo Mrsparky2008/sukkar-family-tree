@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS people (
     father_id              INTEGER REFERENCES people(id) ON DELETE SET NULL,
     mother_id              INTEGER REFERENCES people(id) ON DELETE SET NULL,
     branch_id              INTEGER REFERENCES branches(id) ON DELETE SET NULL,
+    -- 1 when this person's house was stated by somebody who would know,
+    -- rather than inherited down the father chain. A declaration is a
+    -- fixed point: re-deriving houses never overwrites one.
+    branch_declared        INTEGER NOT NULL DEFAULT 0 CHECK (branch_declared IN (0, 1)),
     notes                  TEXT,
     -- Whether this spelling came from the person themselves. A relative
     -- guessing how you spell your own name loses to you every time; see

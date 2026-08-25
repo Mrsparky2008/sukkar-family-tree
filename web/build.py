@@ -90,9 +90,14 @@ def collect(conn) -> dict:
         if row["partner_a_id"] in by_id and row["partner_b_id"] in by_id
     ]
 
+    # Only groupings somebody is actually in. A configured house with no
+    # members yet would otherwise put a filter chip on the page that hides
+    # everybody when tapped.
+    populated = {row["branch_id"] for row in people if row["branch_id"]}
     branches = [
         {"id": row["id"], "name": row["display_name"], "colour": row["colour"]}
         for row in db.get_branches(conn)
+        if row["id"] in populated
     ]
 
     return {"people": payload_people, "unions": unions, "branches": branches}

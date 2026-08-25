@@ -82,6 +82,13 @@ PERSON_FIELDS = frozenset(
         "same_person_id",
         "same_submission_id",
         "not_person_id",
+        # Which house (sub-lineage) of the family they say they belong to.
+        # A key from the configured list, or whatever they typed when none
+        # of them fitted — kept verbatim either way, because an unrecognised
+        # house is information, not an error. It is deliberately NOT part of
+        # any name: names are built from given + father's + family, and the
+        # spellings machinery would fracture if a house name leaked in.
+        "house",
     }
 )
 
@@ -101,6 +108,7 @@ def person(
     family_name: str | None = None,
     father_given_name: str | None = None,
     notes: str | None = None,
+    house: str | None = None,
 ) -> dict[str, Any]:
     """One named person inside a payload.
 
@@ -118,6 +126,7 @@ def person(
         "family_name": (family_name or "").strip() or None,
         "father_given_name": (father_given_name or "").strip() or None,
         "notes": (notes or "").strip() or None,
+        "house": (house or "").strip() or None,
     }
 
 
@@ -364,6 +373,8 @@ def detail_lines(payload: dict[str, Any]) -> list[str]:
             extras.append(f"father said to be {entry['father_given_name']}")
         if entry.get("given_name_ar"):
             extras.append(entry["given_name_ar"])
+        if entry.get("house"):
+            extras.append(f"house: {entry['house']}")
         if entry.get("notes"):
             extras.append(entry["notes"])
         if entry.get("same_person_id"):

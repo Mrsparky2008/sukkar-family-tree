@@ -144,6 +144,7 @@ def _build_identify(answers, submitted_by, about, **_):
                 sex=answers.get("sex"),
                 family_name=family_name_from(answers),
                 father_given_name=answers.get("father_given"),
+                house=house_from(answers),
             )
         ],
     )
@@ -253,6 +254,53 @@ def _family_choices() -> list[tuple[str, str]]:
     ]
 
 
+HOUSE_OTHER = "__other_house__"
+HOUSE_UNKNOWN = "__no_house__"
+
+
+def _house_choices() -> list[tuple[str, str]]:
+    """The configured houses, plus one we have not heard of, plus not knowing.
+
+    "I'm not sure" is a real answer and must stay one tap away: a guessed
+    house would be inherited by everyone below them on the father chain.
+    """
+    return (
+        [(house["display_name"], house["key"]) for house in config.HOUSES]
+        + [(texts.HOUSE_OTHER, HOUSE_OTHER), (texts.HOUSE_UNKNOWN, HOUSE_UNKNOWN)]
+    )
+
+
+def house_from(answers: dict[str, Any]) -> str | None:
+    """Whichever house they picked, or typed when none of them fitted."""
+    chosen = answers.get("house")
+    if chosen == HOUSE_OTHER:
+        return (answers.get("house_other") or "").strip() or None
+    if chosen == HOUSE_UNKNOWN:
+        return None
+    return chosen
+
+
+def _house_steps() -> list[Step]:
+    """Nothing at all for a family that does not divide into houses."""
+    if not config.HOUSES:
+        return []
+    return [
+        Step(
+            "house",
+            CHOICE,
+            f"{texts.ASK_SELF_HOUSE}\n\n{texts.ASK_SELF_HOUSE_WHY}",
+            choices=_house_choices(),
+        ),
+        Step(
+            "house_other",
+            TEXT,
+            texts.ASK_HOUSE_OTHER,
+            only_if="house",
+            only_if_value=HOUSE_OTHER,
+        ),
+    ]
+
+
 IDENTIFY = Flow(
     kind=submissions.IDENTIFY,
     steps=[
@@ -265,6 +313,10 @@ IDENTIFY = Flow(
             only_if="family",
             only_if_value=FAMILY_OTHER,
         ),
+        # The house goes here, before the "is one of these you?" step: it is
+        # the fact that stops a man being offered his own name from another
+        # house as a match, which is where a wrong tap makes a duplicate.
+        *_house_steps(),
         # Not optional: everybody knows their own father's name, and the
         # matcher needs it. "I don't know" stays available for ancestors,
         # where it is a real answer.

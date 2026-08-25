@@ -95,9 +95,34 @@ async def contributor_state(telegram_user_id: int) -> dict[str, Any]:
 
 
 def _identity_candidates(
-    conn: sqlite3.Connection, given_name: str, father_given_name: str | None
+    conn: sqlite3.Connection,
+    given_name: str,
+    father_given_name: str | None,
+    house: str | None,
 ) -> list[dict[str, Any]]:
     matches = db.find_probable_matches(conn, given_name, father_given_name)
+
+    # Two people of the same name in two different houses are two people.
+    # Offering one as the other is how a wrong tap makes a duplicate, so a
+    # candidate is dropped when both houses are known and differ — never on
+    # a house we are guessing at.
+    #
+    # Houses are compared only against houses. The same table also holds
+    # groupings established by descent from a named ancestor, which answer a
+    # different question and must not be weighed against a declared house.
+    wanted = db.get_branch_by_key(conn, house) if house else None
+    house_ids = {
+        branch["id"]
+        for branch in db.get_branches(conn)
+        if branch["key"] in {entry["key"] for entry in config.HOUSES}
+    }
+    if wanted is not None and wanted["id"] in house_ids:
+        matches = [
+            (row, score)
+            for row, score in matches
+            if row["branch_id"] not in house_ids - {wanted["id"]}
+        ]
+
     return [
         {
             "person_id": row["id"],
@@ -109,10 +134,12 @@ def _identity_candidates(
 
 
 async def identity_candidates(
-    given_name: str, father_given_name: str | None = None
+    given_name: str,
+    father_given_name: str | None = None,
+    house: str | None = None,
 ) -> list[dict[str, Any]]:
     """People who might already be this contributor, best first."""
-    return await _run(_identity_candidates, given_name, father_given_name)
+    return await _run(_identity_candidates, given_name, father_given_name, house)
 
 
 def _link_contributor(

@@ -121,6 +121,38 @@ FOUNDING_ANCESTORS = [
 
 #: Fallback palette, used if a branch above omits `colour` or more branches
 #: exist than colours defined.
+#: Step 2b. The houses (sub-lineages) the family divides into.
+#:
+#: A large family splits into named houses, inherited father to son, usually
+#: from the nickname of an ancestor several generations back. People use them
+#: exactly the way this project uses a father's given name: to tell apart the
+#: many men who share one name.
+#:
+#: Houses are DECLARED, not computed. The ancestor a house is named for is
+#: normally too far back to be in the tree, so a member says which house they
+#: are from and everyone below them on the father chain inherits it. If that
+#: ancestor is ever identified, add the house to FOUNDING_ANCESTORS as well
+#: and descent from him settles it outright.
+#:
+#: Both this list and FOUNDING_ANCESTORS materialise into the same `branches`
+#: table — one grouping, two ways of establishing membership. Keys must not
+#: collide between them.
+#:
+#: Empty list = this family has no houses, and the bot never asks.
+HOUSES = [
+    {"key": "atrash", "display_name": "Atrash", "colour": "#3d6b8f"},
+    {"key": "abed", "display_name": "Abed", "colour": "#9c6644"},
+    {"key": "zarif", "display_name": "Zarif", "colour": "#6b8f3d"},
+    {"key": "khoury", "display_name": "Khoury", "colour": "#8f3d6b"},
+]
+
+#: The house every existing record belonged to before the bot started asking.
+#: Set once, when houses are introduced to a tree that already has people in
+#: it; leave as None for a new tree. It is a starting point, not a default for
+#: newcomers — the bot always asks.
+HOUSE_ALREADY_RECORDED = "atrash"
+
+
 BRANCH_PALETTE = [
     "#3d6b8f",
     "#9c6644",

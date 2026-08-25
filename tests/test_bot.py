@@ -77,6 +77,7 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.start()
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Youssef")
         await chat.tap(texts.SELF_MAN)
         await chat.tap("Khalil Youssef")
@@ -90,6 +91,7 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         # New signups get the guided tour; these tests drive the menu.
@@ -144,6 +146,7 @@ class IdentificationTests(BotTestCase):
         await chat.start()
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Youssef")
         await chat.tap(texts.SELF_MAN)
         self.assertIn("Khalil Youssef Sukkar", str(chat.buttons))
@@ -169,6 +172,7 @@ class IdentificationTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fadi")
         await chat.tap(texts.SELF_MAN)
 
@@ -183,6 +187,7 @@ class IdentificationTests(BotTestCase):
         await chat.start()
         await chat.say("Khalil")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Youssef")
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.IDENTITY_NONE_OF_THESE)
@@ -204,6 +209,7 @@ class IdentificationTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fadi")
         await chat.tap(texts.SELF_MAN)
 
@@ -235,6 +241,7 @@ class FamilyNameTests(BotTestCase):
         await chat.start()
         await chat.say("Steven")
         await chat.tap("Succar")
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim")
         await chat.tap(texts.SELF_MAN)
 
@@ -248,6 +255,7 @@ class FamilyNameTests(BotTestCase):
         await chat.tap(texts.FAMILY_OTHER)
         self.assertIn(texts.ASK_FAMILY_OTHER, chat.text)
         await chat.say("Soukar")
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim")
         await chat.tap(texts.SELF_MAN)
 
@@ -278,6 +286,7 @@ class FamilyNameTests(BotTestCase):
         await chat.say("Steven")
         await chat.tap(texts.FAMILY_OTHER)
         await chat.say("Soukar")
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim")
         await chat.tap(texts.SELF_MAN)
 
@@ -460,6 +469,7 @@ class AddParentsTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")             # own father: always known, now required
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_MENU)
@@ -487,6 +497,7 @@ class AddParentsTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_MENU)
@@ -870,6 +881,7 @@ class IdentityCheckTests(BotTestCase):
             await chat.start()
             await chat.say("Khalil")
             await chat.tap(config.FAMILY_NAME)
+            await chat.tap(config.HOUSES[0]["display_name"])
             await chat.say("Youssef")
             await chat.tap(texts.SELF_MAN)
             self.assertIn(texts.IDENTITY_GUESS, chat.text)
@@ -1177,6 +1189,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.start()
         await chat.say("Steven.")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim,")
         await chat.tap(texts.SELF_MAN)
 
@@ -1189,6 +1202,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.start()
         await chat.say("Abou-Khalil")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         self.assertEqual(
@@ -1201,6 +1215,7 @@ class UnderstandingTypedAnswersTests(BotTestCase):
         await chat.start()
         await chat.say("Steven")
         await chat.say("Su K ar")
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim")
         await chat.tap(texts.SELF_MAN)
         self.assertEqual(
@@ -1383,6 +1398,7 @@ class BrotherOrSisterTests(BotTestCase):
         await chat.start()
         await chat.say("Steven")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Kalim")
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_MENU)
@@ -1443,6 +1459,7 @@ class GuidedTourTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         return chat
@@ -1530,6 +1547,7 @@ class TourAwarenessTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_SKIP)          # parents later
@@ -1557,6 +1575,7 @@ class CountedCaptureTests(BotTestCase):
         await chat.start()
         await chat.say("Zaher")
         await chat.tap(config.FAMILY_NAME)
+        await chat.tap(config.HOUSES[0]["display_name"])
         await chat.say("Fares")
         await chat.tap(texts.SELF_MAN)
         await chat.tap(texts.TOUR_SKIP)          # parents later
@@ -1664,6 +1683,7 @@ class LinkQuestionTests(BotTestCase):
         await second.start()
         await second.say("Georges")
         await second.tap(config.FAMILY_NAME)
+        await second.tap(config.HOUSES[0]["display_name"])
         await second.say("Youssef")
         await second.tap(texts.SELF_MAN)
         await second.tap("Georges Youssef")
@@ -1689,6 +1709,7 @@ class LinkQuestionTests(BotTestCase):
         await first.start()
         await first.say("Steven")
         await first.tap(config.FAMILY_NAME)
+        await first.tap(config.HOUSES[0]["display_name"])
         await first.say("Kalim")
         await first.tap(texts.SELF_MAN)
         await first.say("My brother Joseph and sister Nawal")
@@ -1698,6 +1719,7 @@ class LinkQuestionTests(BotTestCase):
         await second.start()
         await second.say("Nawal")
         await second.tap(config.FAMILY_NAME)
+        await second.tap(config.HOUSES[0]["display_name"])
         await second.say("Kalim")
         await second.tap(texts.SELF_WOMAN)
         await second.say("My brothers Steven and Joseph")
@@ -1752,3 +1774,141 @@ class WiringTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class HouseSignInTests(BotTestCase):
+    """The house is asked once, at sign-in, and inherited by everyone after.
+
+    It is also what keeps two same-named men in two houses apart at the
+    riskiest moment there is: the "is one of these you?" tap.
+    """
+
+    def house(self, position: int = 0) -> dict:
+        return config.HOUSES[position]
+
+    async def sign_in(self, chat, given, father, house_label, sex=None):
+        await chat.start()
+        await chat.say(given)
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(house_label)
+        await chat.say(father)
+        await chat.tap(sex or texts.SELF_MAN)
+        return chat
+
+    async def test_the_house_is_asked_and_kept(self):
+        chat = Conversation(user_id=5801)
+        await chat.start()
+        await chat.say("Sarkis")
+        await chat.tap(config.FAMILY_NAME)
+        self.assertIn(texts.ASK_SELF_HOUSE, chat.text)
+        # The reason travels with the question.
+        self.assertIn(texts.ASK_SELF_HOUSE_WHY, chat.text)
+        await chat.tap(self.house()["display_name"])
+        await chat.say("Tanios")
+        await chat.tap(texts.SELF_MAN)
+
+        entry = self.queued()[-1]["payload"]["people"][0]
+        self.assertEqual(entry["house"], self.house()["key"])
+
+    async def test_not_knowing_is_a_real_answer(self):
+        chat = Conversation(user_id=5802)
+        await chat.start()
+        await chat.say("Sarkis")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.HOUSE_UNKNOWN)
+        await chat.say("Tanios")
+        await chat.tap(texts.SELF_MAN)
+
+        entry = self.queued()[-1]["payload"]["people"][0]
+        self.assertIsNone(entry["house"], "a guess would be inherited downward")
+
+    async def test_a_house_we_have_not_listed_is_kept_verbatim(self):
+        chat = Conversation(user_id=5803)
+        await chat.start()
+        await chat.say("Sarkis")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.HOUSE_OTHER)
+        await chat.say("Haddad")
+        await chat.say("Tanios")
+        await chat.tap(texts.SELF_MAN)
+
+        entry = self.queued()[-1]["payload"]["people"][0]
+        self.assertEqual(entry["house"], "Haddad")
+
+    async def test_approving_a_sign_in_declares_the_house(self):
+        import review
+
+        chat = Conversation(user_id=5804)
+        await self.sign_in(chat, "Sarkis", "Tanios", self.house()["display_name"])
+
+        conn = db.connect()
+        try:
+            sid = self.queued()[-1]["id"]
+            created = review.approve(conn, sid, reviewed_by=1, force=True)
+            person = db.get_person(conn, created[0])
+            branch = db.get_branch_by_key(conn, self.house()["key"])
+            self.assertEqual(person["branch_id"], branch["id"])
+            self.assertEqual(person["branch_declared"], 1)
+        finally:
+            conn.close()
+
+    async def test_an_unlisted_house_is_flagged_rather_than_guessed(self):
+        import review
+
+        chat = Conversation(user_id=5805)
+        await chat.start()
+        await chat.say("Sarkis")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(texts.HOUSE_OTHER)
+        await chat.say("Haddad")
+        await chat.say("Tanios")
+        await chat.tap(texts.SELF_MAN)
+
+        conn = db.connect()
+        try:
+            sid = self.queued()[-1]["id"]
+            created = review.approve(conn, sid, reviewed_by=1, force=True)
+            self.assertIsNone(db.get_person(conn, created[0])["branch_id"])
+            note = db.get_submission(conn, sid)["review_note"]
+            self.assertIn("Haddad", note)
+        finally:
+            conn.close()
+
+    async def test_the_same_name_in_another_house_is_not_offered_as_you(self):
+        # Khalil Youssef is on the seeded tree. Declare him into one house,
+        # then let a different Khalil Youssef sign in from another.
+        conn = db.connect()
+        try:
+            db.declare_house(conn, self.ids["khalil_y"], self.house(0)["key"])
+            conn.commit()
+        finally:
+            conn.close()
+
+        chat = Conversation(user_id=5806)
+        await chat.start()
+        await chat.say("Khalil")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(self.house(1)["display_name"])
+        await chat.say("Youssef")
+        await chat.tap(texts.SELF_MAN)
+
+        self.assertNotIn(texts.IDENTITY_GUESS, chat.text)
+        self.assertEqual(self.queued()[-1]["payload"]["kind"], submissions.IDENTIFY)
+
+    async def test_the_same_house_still_collides_as_before(self):
+        conn = db.connect()
+        try:
+            db.declare_house(conn, self.ids["khalil_y"], self.house(0)["key"])
+            conn.commit()
+        finally:
+            conn.close()
+
+        chat = Conversation(user_id=5807)
+        await chat.start()
+        await chat.say("Khalil")
+        await chat.tap(config.FAMILY_NAME)
+        await chat.tap(self.house(0)["display_name"])
+        await chat.say("Youssef")
+        await chat.tap(texts.SELF_MAN)
+
+        self.assertIn(texts.IDENTITY_GUESS, chat.text)

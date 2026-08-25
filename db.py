@@ -86,6 +86,7 @@ _LATER_COLUMNS = {
         "family_name_self_reported": "INTEGER NOT NULL DEFAULT 0",
         "also_known_as": "TEXT",
         "from_submission_id": "INTEGER",
+        "branch_declared": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
@@ -602,12 +603,23 @@ def peer_checks_for(
 
 
 def sync_branches(conn: sqlite3.Connection) -> None:
-    """Materialise config.FOUNDING_ANCESTORS into the `branches` table.
+    """Materialise the configured groupings into the `branches` table.
 
-    Keyed on `key`, so editing a display name, colour, or branch admin in
-    config and re-running updates the row instead of creating a second one.
+    Two lists feed it, because there are two ways to belong to a grouping and
+    the family knows one of them long before the other:
+
+      * `config.HOUSES` — declared. Somebody says which house they are from
+        and their descendants inherit it.
+      * `config.FOUNDING_ANCESTORS` — computed. Descent from a named man in
+        the tree settles it outright.
+
+    They are the same grouping either way, so both land in one table and keys
+    must not collide. Keyed on `key`, so editing a display name, colour, or
+    branch admin in config and re-running updates the row instead of creating
+    a second one.
     """
-    for position, entry in enumerate(config.FOUNDING_ANCESTORS):
+    configured = list(config.HOUSES) + list(config.FOUNDING_ANCESTORS)
+    for position, entry in enumerate(configured):
         colour = entry.get("colour") or config.BRANCH_PALETTE[
             position % len(config.BRANCH_PALETTE)
         ]
@@ -650,19 +662,50 @@ def set_branch_founder(
     )
 
 
+def declare_house(
+    conn: sqlite3.Connection, person_id: int, branch_key: str
+) -> bool:
+    """Record that this person belongs to this house, on somebody's word.
+
+    A declaration is a fixed point: `assign_branches` will never overwrite
+    it, and everyone below on the father chain inherits it. Returns False
+    for a house nobody has configured, so an unrecognised answer is kept as
+    a claim on the record rather than guessed into the wrong grouping.
+    """
+    branch = get_branch_by_key(conn, branch_key)
+    if branch is None:
+        return False
+    conn.execute(
+        "UPDATE people SET branch_id = ?, branch_declared = 1 WHERE id = ?",
+        (branch["id"], person_id),
+    )
+    return True
+
+
 def assign_branches(conn: sqlite3.Connection) -> int:
     """Give every person a branch, and return how many were changed.
 
-    Two passes, in order of confidence:
+    Three passes, in order of confidence:
 
-      1. Patriline. Walk father links upward; the first founding ancestor
-         reached decides the branch. This covers everyone born into the family.
-      2. Marriage. Anyone still unassigned takes the branch of a partner who
-         has one. This covers women who married in, so they appear when the
-         public view is filtered to their husband's branch.
+      1. Declaration. Somebody who would know said which house this person
+         belongs to. Nothing derived may overwrite it.
+      2. Patriline. Walk father links upward; the first declared ancestor or
+         founding ancestor reached decides it. This covers everyone born into
+         the family, including those whose house nobody stated directly.
+      3. Marriage. Anyone still unassigned takes the branch of a partner who
+         has one. This covers people who married in, so they appear when the
+         public view is filtered to their spouse's grouping — assigned, never
+         declared, because it is not theirs by birth.
 
-    Anyone reachable by neither is left NULL rather than guessed at.
+    Anyone reachable by none of the three is left NULL rather than guessed at.
     """
+    declared = {
+        row["id"]: row["branch_id"]
+        for row in conn.execute(
+            "SELECT id, branch_id FROM people"
+            " WHERE branch_declared = 1 AND branch_id IS NOT NULL"
+        )
+    }
     founders = {
         row["founding_ancestor_id"]: row["id"]
         for row in conn.execute(
@@ -686,6 +729,9 @@ def assign_branches(conn: sqlite3.Connection) -> int:
         while current is not None:
             if current in resolved:
                 found = resolved[current]
+                break
+            if current in declared:
+                found = declared[current]
                 break
             if current in founders:
                 found = founders[current]
@@ -1494,9 +1540,17 @@ def check_integrity(conn: sqlite3.Connection) -> dict[str, list[Any]]:
     """Everything worth a human's attention about the current data."""
     fk_violations = conn.execute("PRAGMA foreign_key_check").fetchall()
 
-    orphan_branches = conn.execute(
-        "SELECT * FROM branches WHERE founding_ancestor_id IS NULL"
-    ).fetchall()
+    # A house is declared, not descended from anyone in the tree, so having
+    # no founding ancestor is its normal state. Only a grouping that claims
+    # to be defined by descent is incomplete without one.
+    by_descent = {entry["key"] for entry in config.FOUNDING_ANCESTORS}
+    orphan_branches = [
+        row
+        for row in conn.execute(
+            "SELECT * FROM branches WHERE founding_ancestor_id IS NULL"
+        )
+        if row["key"] in by_descent
+    ]
 
     no_branch = conn.execute(
         PERSON_SELECT + " WHERE p.branch_id IS NULL ORDER BY p.id"

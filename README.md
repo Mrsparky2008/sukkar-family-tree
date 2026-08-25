@@ -14,7 +14,7 @@ family can fork this repo, edit that one file, and deploy.
 
 ---
 
-## The four rules
+## The six rules
 
 These shape every file here. They are worth reading before changing anything.
 
@@ -50,7 +50,20 @@ conflicting wait for a person — and a claim that disagrees with the record
 first sends a question to whoever made the standing entry, so the family
 settles most of it before an admin has to.
 
-**5. Names are for humans; numbers are the reference.**
+**5. A house is declared, then inherited — and it is never part of a name.**
+A large family divides into houses that pass from father to son, usually
+named for an ancestor too far back to be in the tree. So membership cannot be
+computed from descent alone: somebody who knows says which house they are
+from, and everyone below them on the father chain inherits it. A declaration
+is a fixed point that re-deriving never overwrites. Houses live in the
+`branches` table alongside groupings established by descent from a named
+ancestor — one grouping, two ways of establishing membership — and are
+compared only against each other. The house is a field on a person, never a
+part of their name: `display_name()` is given + father's + family, and the
+spellings machinery that keeps every spelling of the family name together
+would fracture if a house name leaked into it.
+
+**6. Names are for humans; numbers are the reference.**
 Every approved person keeps one permanent number (`#12`) that never changes —
 not for a respelling, a married name, or any other correction. The bot shows
 the number beside the name wherever it talks about a tree person, so the
@@ -139,18 +152,22 @@ web/            Step 4 — the public chart. `python web/build.py` writes one
 | `unions` | Marriage edges. Undirected — a cousin marriage is one more edge, not a broken branch. |
 | `submissions` | The queue. Everything from the bot lands here first. |
 | `contributors` | Telegram identity. The user ID *is* the login. |
-| `branches` | One per founding brother, materialised from `config.py`. |
+| `branches` | The family's groupings — houses, and lines from a founding ancestor. Materialised from `config.py`. |
 
 ### Branch assignment
 
-Nobody types a branch. `db.assign_branches()` derives it, in order of
-confidence:
+Nobody types a branch onto a person. `db.assign_branches()` derives it, in
+order of confidence:
 
-1. **Patriline** — walk father links up to a founding ancestor.
-2. **Marriage** — anyone still unassigned takes a partner's branch, so a woman
-   who married in shows up when the view is filtered to her husband's branch.
+1. **Declaration** — somebody who would know said which house this person
+   belongs to. Nothing derived may overwrite it.
+2. **Patriline** — walk father links up to the first declared ancestor or
+   founding ancestor.
+3. **Marriage** — anyone still unassigned takes a partner's branch, so someone
+   who married in shows up when the view is filtered to their spouse's
+   grouping. Assigned, never declared: it is not theirs by birth.
 
-Anyone reachable by neither — an ancestor above the split into branches, for
+Anyone reachable by none of the three — an ancestor above the split, for
 instance — is left unassigned rather than guessed at.
 
 ---

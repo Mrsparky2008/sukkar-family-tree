@@ -881,7 +881,9 @@ async def _offer_identity_matches(
     """Show who we think they are. They decide; the matcher only suggests."""
     entry = payload["people"][0]
     candidates = await store.identity_candidates(
-        entry["given_name"], entry.get("father_given_name")
+        entry["given_name"],
+        entry.get("father_given_name"),
+        house=entry.get("house"),
     )
 
     if not candidates:

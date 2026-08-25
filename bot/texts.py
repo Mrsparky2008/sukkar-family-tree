@@ -24,7 +24,7 @@ WELCOME = (
     f"Welcome.\n\n"
     f"This is the {FAMILY} family tree of {VILLAGE}. Relatives add the names "
     f"they know, the family checks them, and the tree grows.\n\n"
-    f"Two questions and you're in."
+    f"A few quick questions and you're in."
 )
 
 ASK_SELF_GIVEN = "What's your first name?"
@@ -43,6 +43,26 @@ ASK_SELF_FATHER_WHY = (
 )
 
 ASK_SELF_SEX = "And are you a man or a woman? It's how the tree draws you."
+
+#: The house question. Asked of everyone at sign-in, because a house passes
+#: father to son and everyone added afterwards inherits it — one tap here
+#: saves the question being asked of a dozen relatives later.
+ASK_SELF_HOUSE = "And which house are you from?"
+
+ASK_SELF_HOUSE_WHY = (
+    "The family divides into houses that pass from father to son. Knowing "
+    "yours keeps you with the right relatives — and stops you being mixed "
+    "up with someone who shares your name in another house."
+)
+
+HOUSE_OTHER = "Another house"
+HOUSE_UNKNOWN = "I'm not sure"
+ASK_HOUSE_OTHER = "Which house? Type the name as your family says it."
+
+#: Shown on a person's own record and in the review desk. Never inside a
+#: name — see the note on the `house` field in submissions.py.
+def house_line(name: str) -> str:
+    return f"House: {name}"
 
 FATHER_NOT_FAMILY = (
     "That's the family name — I need your father's FIRST name. "
