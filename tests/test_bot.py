@@ -1011,6 +1011,14 @@ class PhoneReviewTests(BotTestCase):
         await chat.say(name)
         await chat.tap(texts.CONFIRM_CORRECT)
 
+    async def test_a_claim_is_not_read_out_twice(self):
+        chat = await self.identified_as_khalil()
+        await self.queue_for_desk(chat, name="Rita")
+        await self.open_desk(chat)
+        body = chat.text.split("\n")
+        claims = [line for line in body if "Rita" in line]
+        self.assertEqual(len(claims), 1, chat.text)
+
     async def test_the_desk_is_for_admins_only(self):
         chat = await self.identified_as_khalil(user_id=5002)
         await self.open_desk(chat)

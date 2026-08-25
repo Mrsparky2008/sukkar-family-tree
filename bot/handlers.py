@@ -2833,9 +2833,11 @@ async def _show_review_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not item.get("id"):
         return await _close_review(update, context, desk)
 
+    # `detail_lines` already opens with the summary, and adds a line per
+    # person only where they carry something it does not show. Printing the
+    # summary as well said everything twice.
     lines = [texts.review_heading(item["id"], item["remaining"]), ""]
-    lines.append(item["summary"])
-    lines += item["details"]
+    lines += item["details"] or [item["summary"]]
     for check in item.get("checks") or []:
         lines.append(texts.review_check_line(check["who"], check["verdict"]))
 
