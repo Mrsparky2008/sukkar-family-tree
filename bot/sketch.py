@@ -180,6 +180,7 @@ def build(payloads: list[dict], self_name: str | None = None,
     # ---- draw -------------------------------------------------------------
 
     drawn: set[int] = set()
+    drawn_names: set[str] = set()
     lines: list[str] = []
 
     def deco(name: str) -> str:
@@ -192,40 +193,59 @@ def build(payloads: list[dict], self_name: str | None = None,
             number = ids.get(first)
         return f"{name} #{number}" if number is not None else name
 
-    def couple_line(name: str) -> str:
+    def couple_line(name: str, below: "_Family | None" = None) -> str:
+        """One person on a child line, with their spouse when it is theirs.
+
+        A marriage that stands as a couple's own family node belongs to
+        whoever heads that node. Drawing it beside anyone else married a
+        grandson to his grandmother, because two men of one name are one
+        name here — so the marriage is shown only when the family about to
+        be drawn beneath this line is that couple's own.
+        """
         partner = spouses.get(name)
-        # A marriage that already stands as a couple's own family node
-        # belongs to THAT couple — never to a child who happens to carry
-        # the grandfather's name. Kalim's grandson Kalim is not ⚭ Wadiha.
-        if partner and any(
-            set(f.parents) == {name, partner}
-            for f in families
-            if len(f.parents) == 2
-        ):
-            partner = None
-        return f"{deco(name)} ⚭ {deco(partner)}" if partner else deco(name)
+        if partner:
+            own = next(
+                (
+                    family
+                    for family in families
+                    if len(family.parents) == 2
+                    and set(family.parents) == {name, partner}
+                ),
+                None,
+            )
+            if own is not None and own is not below:
+                partner = None
+        drawn_names.add(name)
+        if partner:
+            drawn_names.add(partner)
+            return f"{deco(name)} ⚭ {deco(partner)}"
+        return deco(name)
 
     def draw(family: _Family, indent: str) -> None:
         if id(family) in drawn:
             return
         drawn.add(id(family))
         parents = " ⚭ ".join(deco(name) for name in family.parents)
+        drawn_names.update(family.parents)
         for name in family.parents:
             partner = spouses.get(name)
             if partner and partner not in family.parents:
                 parents += f" ⚭ {deco(partner)}"
+                drawn_names.add(partner)
         lines.append(indent + parents)
         draw_children(family, indent)
 
     def draw_children(family: _Family, indent: str) -> None:
         for position, child in enumerate(family.children):
             last = position == len(family.children) - 1
-            lines.append(indent + ("└ " if last else "├ ") + couple_line(child))
             below = next(
                 (f for f in families
                  if id(f) not in drawn
                  and (child in f.parents or spouses.get(child) in f.parents)),
                 None,
+            )
+            lines.append(
+                indent + ("└ " if last else "├ ") + couple_line(child, below)
             )
             if below is not None:
                 drawn.add(id(below))
@@ -240,15 +260,15 @@ def build(payloads: list[dict], self_name: str | None = None,
             lines.append("")
         draw(family, "")
 
-    # Couples connected to nothing else still deserve a line.
-    shown = set()
-    for line in lines:
-        shown.update(part.strip("├└│ ") for part in line.split(" ⚭ "))
-    loose = [
-        f"{name} ⚭ {partner}"
+    # Couples connected to nothing else still deserve a line — decorated
+    # like every other name, and only when neither of them is already on
+    # the drawing.
+    lines.extend(
+        f"{deco(name)} ⚭ {deco(partner)}"
         for name, partner in spouses.items()
-        if name < partner and name not in "".join(lines)
-    ]
-    lines.extend(loose)
+        if name < partner
+        and name not in drawn_names
+        and partner not in drawn_names
+    )
 
     return "\n".join(lines).strip()

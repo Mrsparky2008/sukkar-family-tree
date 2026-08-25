@@ -69,5 +69,75 @@ class OneCoupleTests(unittest.TestCase):
         self.assertRegex(drawing, r"[├└] Toufic\n")
 
 
+
+def spouse_of(person, name, family=None):
+    return {
+        "kind": S.ADD_SPOUSE,
+        "about": {"label": person},
+        "people": [S.person(S.SPOUSE, name, sex="F", family_name=family)],
+    }
+
+
+def child_of(person, name):
+    return {
+        "kind": S.ADD_CHILD,
+        "about": {"label": person},
+        "people": [S.person(S.CHILD, name, sex="M")],
+    }
+
+
+class MarriageOnTheirOwnLineTests(unittest.TestCase):
+    """A couple's marriage belongs on the line of whoever heads it.
+
+    Suppressing it wherever the couple had children hid every marriage in
+    the middle of a tree — a man appeared beside his parents with no wife,
+    and she was left dangling at the bottom with no number.
+    """
+
+    def drawing(self):
+        return sketch.build(
+            [
+                parents_of("Kalim", "Toufic", "Seleneh"),
+                parents_of("Steven", "Kalim", "Wadiha"),
+                child_of("Steven", "Henri"),
+            ],
+            ids={"Kalim": 27, "Wadiha": 28, "Toufic": 29, "Steven": 1},
+        )
+
+    def test_a_father_shows_his_marriage_beside_his_own_parents(self):
+        drawing = self.drawing()
+        self.assertIn("Kalim #27 ⚭ Wadiha #28", drawing)
+
+    def test_the_children_still_hang_below_that_couple(self):
+        drawing = self.drawing()
+        lines = [line for line in drawing.split("\n") if "Steven" in line]
+        self.assertTrue(lines, drawing)
+        self.assertTrue(lines[0].lstrip().startswith(("├", "└")), drawing)
+
+    def test_nobody_is_left_dangling_without_a_number(self):
+        # The spouse used to reappear at the bottom, undecorated, because
+        # she never made it onto anyone's line.
+        drawing = self.drawing()
+        self.assertEqual(drawing.count("Wadiha"), 1, drawing)
+        for line in drawing.split("\n"):
+            if "Wadiha" in line:
+                self.assertIn("#28", line)
+
+    def test_a_grandson_of_the_same_name_stays_unmarried(self):
+        # Two men of one name are one name here, so the guard still has to
+        # hold: the grandson must not inherit his grandmother.
+        drawing = sketch.build(
+            [
+                parents_of("Steven", "Kalim", "Wadiha"),
+                child_of("Steven", "Kalim"),
+            ],
+        )
+        grandson = [
+            line for line in drawing.split("\n")
+            if line.strip().startswith(("├ Kalim", "└ Kalim"))
+        ]
+        for line in grandson:
+            self.assertNotIn("⚭", line, drawing)
+
 if __name__ == "__main__":
     unittest.main()
