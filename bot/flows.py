@@ -154,7 +154,12 @@ def _build_parents(answers, submitted_by, about, **_):
     people = []
     if answers.get("father_given"):
         people.append(
-            submissions.person(submissions.FATHER, answers["father_given"], sex="M")
+            submissions.person(
+                submissions.FATHER,
+                answers["father_given"],
+                sex="M",
+                family_name=father_family_from(answers),
+            )
         )
     if answers.get("mother_given"):
         people.append(
@@ -254,6 +259,22 @@ def _family_choices() -> list[tuple[str, str]]:
     ]
 
 
+FATHER_FAMILY_OTHER = "__other_family__"
+
+
+def _father_family_choices() -> list[tuple[str, str]]:
+    return [(variant, variant) for variant in config.FAMILY_NAME_VARIANTS] + [
+        (texts.FATHER_FAMILY_OTHER, FATHER_FAMILY_OTHER)
+    ]
+
+
+def father_family_from(answers: dict[str, Any]) -> str | None:
+    chosen = answers.get("father_family")
+    if chosen == FATHER_FAMILY_OTHER:
+        return (answers.get("father_family_other") or "").strip() or None
+    return chosen
+
+
 HOUSE_OTHER = "__other_house__"
 HOUSE_UNKNOWN = "__no_house__"
 
@@ -343,6 +364,24 @@ ADD_PARENTS = Flow(
     kind=submissions.ADD_PARENTS,
     steps=[
         Step("father_given", NAME, lambda a: texts.ask_father(_subject(a)), optional=True),
+        # Asked, not assumed. One tap for the usual case, and the escape
+        # hatch is what stops a whole branch inheriting a surname nobody
+        # ever stated — somebody who belongs to this family through their
+        # mother has a father who does not.
+        Step(
+            "father_family",
+            CHOICE,
+            lambda a: texts.ask_father_family(_subject(a)),
+            choices=_father_family_choices(),
+            only_if="father_given",
+        ),
+        Step(
+            "father_family_other",
+            TEXT,
+            texts.ASK_FATHER_FAMILY_OTHER,
+            only_if="father_family",
+            only_if_value=FATHER_FAMILY_OTHER,
+        ),
         Step("mother_given", NAME, lambda a: texts.ask_mother(_subject(a)), optional=True),
         Step(
             "mother_family",

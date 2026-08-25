@@ -543,6 +543,57 @@ class AddSiblingAndSpouseTests(BotTestCase):
         self.assertEqual(entry["family_name"], "Obeid")
 
 
+class FathersFamilyNameTests(BotTestCase):
+    """The father's family name is asked, not assumed.
+
+    Assuming it gave a whole branch a surname nobody stated — the case where
+    somebody belongs to this family through their mother, and their father
+    does not belong to it at all.
+    """
+
+    async def test_it_is_asked_when_climbing_to_someone_elses_parents(self):
+        chat = await self.fresh_contributor()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("Nada")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
+        await chat.say("Elias")
+        self.assertIn(config.FAMILY_NAME, chat.buttons)
+        self.assertIn(texts.FATHER_FAMILY_OTHER, chat.buttons)
+
+    async def test_a_father_from_another_family_can_be_named(self):
+        chat = await self.fresh_contributor()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        await chat.say("Nada")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
+        await chat.say("Elias")
+        await chat.tap(texts.FATHER_FAMILY_OTHER)
+        await chat.say("Haddad")
+        await chat.tap(texts.SKIP)
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await self.send_basket(chat)
+
+        fathers = [
+            e
+            for q in self.queued()
+            for e in q["payload"].get("people") or []
+            if e.get("role") == submissions.FATHER and e["given_name"] == "Elias"
+        ]
+        self.assertTrue(fathers, self.queued())
+        self.assertEqual(fathers[0]["family_name"], "Haddad")
+
+    async def test_your_own_father_is_not_asked_about_twice(self):
+        # His given name came from signing in, and the family name they gave
+        # for themselves is his — that is where theirs came from.
+        chat = await self.fresh_contributor()
+        await chat.tap(texts.MENU_ADD_PARENTS)
+        self.assertIn("mother", chat.text.lower())
+        self.assertNotIn(texts.FATHER_FAMILY_OTHER, chat.buttons)
+
+
 # ===========================================================================
 # Climbing
 # ===========================================================================
@@ -556,7 +607,8 @@ class ClimbTests(BotTestCase):
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
-        self.assertIn("Fares's father", chat.text)
+        self.assertIn("Fares", chat.text)
+        self.assertIn("father", chat.text)
 
     async def test_three_generations_in_one_sitting(self):
         chat = await self.fresh_contributor()
@@ -565,10 +617,12 @@ class ClimbTests(BotTestCase):
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         await chat.say("Elias")
+        await chat.tap(config.FAMILY_NAME)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.NEXT_PARENTS_OF.format(name="Elias"))
         await chat.say("Semaan")
+        await chat.tap(config.FAMILY_NAME)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
@@ -590,10 +644,12 @@ class ClimbTests(BotTestCase):
         await chat.tap("Therese Obeid")
         await chat.tap("parents")
         await chat.say("Tanios")
+        await chat.tap(config.FAMILY_NAME)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.NEXT_PARENTS_OF.format(name="Tanios"))
         await chat.say("Boulos")
+        await chat.tap(config.FAMILY_NAME)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)
@@ -614,6 +670,7 @@ class ClimbTests(BotTestCase):
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.NEXT_PARENTS_OF.format(name="Fares"))
         await chat.say("Elias")
+        await chat.tap(config.FAMILY_NAME)
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         # The panel names whoever the cursor is on.
@@ -1505,6 +1562,7 @@ class GuidedTourTests(BotTestCase):
         self.assertIn("Fares's parents", chat.text)   # grandparents
         await chat.tap(texts.TOUR_LETS_GO)
         await chat.say("Elias")
+        await chat.tap(config.FAMILY_NAME)            # how his family spells it
         await chat.tap(texts.SKIP)
         await chat.tap(texts.CONFIRM_CORRECT)
         await chat.tap(texts.ADD_MORE)

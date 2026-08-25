@@ -570,6 +570,18 @@ ASK_MOTHER_GIVEN = "And your mother's first name?"
 ASK_MOTHER_FAMILY = "What was your mother's family name before she married?"
 
 
+def ask_father_family(subject: str | None) -> str:
+    who = "your father" if not subject else f"{subject}'s father"
+    return f"And how is {who}'s family name spelled?"
+
+
+#: The father was assumed to carry the family's own name. Usually he does —
+#: but when somebody belongs to this family through their mother, he does
+#: not, and the assumption then flows down every one of his descendants.
+FATHER_FAMILY_OTHER = "Another family"
+ASK_FATHER_FAMILY_OTHER = "Which family? Type the name as they spell it."
+
+
 # --- add sibling -----------------------------------------------------------
 
 ASK_SIBLING_SEX = "Is this a brother or a sister?"

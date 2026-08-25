@@ -1556,16 +1556,35 @@ async def _prefill_spouse_sex(update, context, flow) -> None:
         state["index"] = 1
 
 
+def _skip_answered(context, flow) -> None:
+    """Move the cursor past questions the answers already cover.
+
+    Prefilling by index breaks the moment a question is inserted before the
+    one being skipped to — so ask the steps themselves.
+    """
+    state = _state(context)
+    while state["index"] < len(flow.steps):
+        step = flow.steps[state["index"]]
+        if step.id in state["answers"] or not step.applies(state["answers"]):
+            state["index"] += 1
+        else:
+            break
+
+
 async def _prefill_own_father(update, context, flow) -> None:
     if flow.kind == submissions.ADD_PARENTS and _cursor(context) is None:
         # They told us their father's name when they signed up. Asking again
-        # two minutes later reads as if the bot was not listening.
+        # two minutes later reads as if the bot was not listening — and the
+        # family name they gave for themselves is his, since that is where
+        # theirs came from.
         who = await store.contributor_state(update.effective_user.id)
         known = who.get("father_given_name")
         if known:
             state = _state(context)
             state["answers"]["father_given"] = known
-            state["index"] = 1
+            if who.get("family_name"):
+                state["answers"]["father_family"] = who["family_name"]
+            _skip_answered(context, flow)
 
 
 # ===========================================================================

@@ -60,6 +60,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
         "label": row["display_label"] if row else None,
         "identify_submission_id": None,
         "father_given_name": None,
+        "family_name": None,
         "sex": None,
         "telegram_user_id": telegram_user_id,
     }
@@ -70,6 +71,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
             state["label"] = db.row_display_name(person)
             state["branch_id"] = person["branch_id"]
             state["father_given_name"] = person["father_given_name"]
+            state["family_name"] = person["family_name"]
             state["sex"] = person["sex"]
         return state
 
@@ -84,6 +86,7 @@ def _contributor_state(conn: sqlite3.Connection, telegram_user_id: int) -> dict[
                 if not state["label"]:
                     state["label"] = submissions.person_label(entries[0])
                 state["father_given_name"] = entries[0].get("father_given_name")
+                state["family_name"] = entries[0].get("family_name")
                 state["sex"] = entries[0].get("sex")
             break
 
