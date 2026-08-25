@@ -696,6 +696,15 @@ def review_done(count: int) -> str:
 REVIEW_QUEUE_CLEAR = "Nothing waiting — the queue is clear."
 
 
+def review_refused(reason: str) -> str:
+    """A write the database itself would not allow. Say so plainly."""
+    return (
+        "That one can't be applied as it stands — the tree would end up "
+        f"contradicting itself ({reason}). Nothing was changed. Skipping it "
+        "for now."
+    )
+
+
 def review_check_line(who: str, verdict: str | None) -> str:
     word = {
         "stands": "stands by their version",

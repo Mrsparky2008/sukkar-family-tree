@@ -141,6 +141,76 @@ class ApprovalTests(ReviewTestCase):
         self.assertIsNotNone(row["resulting_person_id"])
 
 
+class NobodyIsTheirOwnAncestorTests(ReviewTestCase):
+    """Two relatives of one name, a generation apart, is this family's
+    commonest shape — so "same person" is one tap away from making a man
+    his own father. The schema refuses the write; the reviewer deserves the
+    reason rather than a crash."""
+
+    def setUp(self):
+        super().setUp()
+        self.father = db.create_person(self.conn, "Sarkis", sex="M")
+        self.son = db.create_person(
+            self.conn, "Toufic", sex="M", father_id=self.father
+        )
+
+    def test_merging_a_brother_into_his_own_father_is_refused(self):
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Sarkis", sex="M")],
+            S.subject(person_id=self.son, label="Toufic"),
+        )
+        with self.assertRaises(review.Blocked) as caught:
+            review.approve(
+                self.conn, sid, reviewed_by=1, use_person_id=self.father
+            )
+        self.assertIn("their own", str(caught.exception))
+
+    def test_the_father_is_left_exactly_as_he_was(self):
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Sarkis", sex="M")],
+            S.subject(person_id=self.son, label="Toufic"),
+        )
+        self.conn.commit()
+        with self.assertRaises(review.Blocked):
+            review.approve(
+                self.conn, sid, reviewed_by=1, use_person_id=self.father
+            )
+        self.assertIsNone(db.get_person(self.conn, self.father)["father_id"])
+        self.assertEqual(
+            db.get_submission(self.conn, sid)["status"], "pending"
+        )
+
+    def test_a_longer_ring_is_caught_too(self):
+        # The schema only sees a person who is their own father. Merging
+        # somebody into their own grandfather closes a ring it cannot.
+        grandson = db.create_person(
+            self.conn, "Sarkis", sex="M", father_id=self.son
+        )
+        sid = self.queue(
+            S.ADD_PARENTS,
+            [S.person(S.FATHER, "Sarkis", sex="M")],
+            S.subject(person_id=self.father, label="Sarkis"),
+        )
+        with self.assertRaises(review.Blocked):
+            review.approve(
+                self.conn, sid, reviewed_by=1, use_person_id=grandson
+            )
+
+    def test_an_ordinary_merge_still_works(self):
+        cousin = db.create_person(self.conn, "Elias", sex="M")
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Elias", sex="M")],
+            S.subject(person_id=self.son, label="Toufic"),
+        )
+        review.approve(self.conn, sid, reviewed_by=1, use_person_id=cousin)
+        self.assertEqual(
+            db.get_person(self.conn, cousin)["father_id"], self.father
+        )
+
+
 class MothersHaveProvenanceTests(ReviewTestCase):
     """Who said she existed.
 

@@ -639,6 +639,11 @@ def _admin_resolve(
             return f"unknown review action {action!r}"
     except review.Blocked as blocked:
         return str(blocked)
+    except sqlite3.IntegrityError as refused:
+        # The schema refusing a write is a reason, not a crash. Reaching the
+        # reviewer as "something went wrong" tells them nothing and loses
+        # their place in the queue.
+        return texts.review_refused(str(refused))
     return None
 
 

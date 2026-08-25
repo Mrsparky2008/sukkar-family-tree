@@ -136,6 +136,44 @@ def _create(
 # ---------------------------------------------------------------------------
 
 
+def _would_loop(conn: sqlite3.Connection, person_id: int, parent_id: int) -> bool:
+    """Whether making `parent_id` a parent of `person_id` closes a loop.
+
+    Merging a man into his own father is the easy way to ask for one: two
+    relatives of the same name, one generation apart, is the commonest shape
+    in this family. The schema refuses a person who is their own father, but
+    it cannot see a longer ring, and a rejected write reaches the reviewer as
+    a crash rather than a reason.
+    """
+    seen: set[int] = set()
+    frontier = [parent_id]
+    while frontier:
+        current = frontier.pop()
+        if current == person_id:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        row = db.get_person(conn, current)
+        if row is None:
+            continue
+        frontier += [p for p in (row["father_id"], row["mother_id"]) if p]
+    return False
+
+
+def _check_links(conn, person_id: int, links: dict[str, Any]) -> None:
+    """Refuse a parent link that would make somebody their own ancestor."""
+    for column, parent_id in links.items():
+        if parent_id and _would_loop(conn, person_id, parent_id):
+            who = db.get_person(conn, person_id)
+            side = "father" if column == "father_id" else "mother"
+            name = db.row_display_name(who) if who else f"#{person_id}"
+            raise Blocked(
+                f"that would make {name} their own {side} — or their own "
+                f"ancestor further up. They cannot be the same person."
+            )
+
+
 def _fathers_name(conn: sqlite3.Connection, father: sqlite3.Row | None,
                   entry: dict[str, Any]) -> dict[str, Any]:
     """A person born into the family carries their father's family name.
@@ -283,6 +321,7 @@ def approve(
                         f"would replace them. If that is really the fix: "
                         f"--approve {submission_id} --anyway"
                     )
+            _check_links(conn, subject_id, links)
             db.update_person(conn, subject_id, **links)
             if father_id and mother_id:
                 db.create_union(conn, father_id, mother_id)
@@ -305,6 +344,7 @@ def approve(
                 links["father_id"] = subject["father_id"]
             if subject["mother_id"] and not existing["mother_id"]:
                 links["mother_id"] = subject["mother_id"]
+            _check_links(conn, primary, links)
             if links:
                 db.update_person(conn, primary, **links)
 
@@ -344,6 +384,7 @@ def approve(
                 )
                 if other_column != column and not existing[other_column]:
                     links[other_column] = other["id"]
+            _check_links(conn, primary, links)
             if links:
                 db.update_person(conn, primary, **links)
 
