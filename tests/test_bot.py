@@ -1679,13 +1679,49 @@ class CountedCaptureTests(BotTestCase):
         await chat.tap("0")
         self.assertIn("married", chat.text)      # straight to the next step
 
-    async def test_change_it_starts_the_batch_over(self):
+    async def test_one_wrong_name_costs_only_that_name(self):
         chat = await self.start_siblings(7302)
+        await chat.tap("2")
+        await chat.tap("0")
+        await chat.tap(texts.YES_WORD)
+        await chat.say("Tony")
+        await chat.say("Walked")        # autocorrect, mid-list
+        self.assertIn("Walked", chat.text)
+
+        await chat.tap(texts.COUNT_FIX.format(name="Walked"))
+        await chat.say("Waleed")
+
+        # Back at the confirmation, with the other name untouched.
+        self.assertIn("Waleed", chat.text)
+        self.assertIn("Tony", chat.text)
+        self.assertNotIn("Walked", chat.text.split("Changed")[-1])
+        self.assertIn(texts.CONFIRM_CORRECT, chat.buttons)
+
+    async def test_the_fixed_name_is_what_gets_sent(self):
+        chat = await self.start_siblings(7304)
+        await chat.tap("1")
+        await chat.tap("0")
+        await chat.tap(texts.YES_WORD)
+        await chat.say("Walked")
+        await chat.tap(texts.COUNT_FIX.format(name="Walked"))
+        await chat.say("Waleed")
+        await chat.tap(texts.CONFIRM_CORRECT)
+
+        names = [
+            e["given_name"]
+            for q in self.queued()
+            for e in q["payload"].get("people") or []
+        ]
+        self.assertIn("Waleed", names)
+        self.assertNotIn("Walked", names)
+
+    async def test_starting_the_whole_list_again_is_still_there(self):
+        chat = await self.start_siblings(7305)
         await chat.tap("1")
         await chat.tap("0")
         await chat.tap(texts.YES_WORD)
         await chat.say("Tonyy")
-        await chat.tap(texts.CONFIRM_CHANGE)
+        await chat.tap(texts.COUNT_START_OVER)
         self.assertIn("How many brothers", chat.text)
 
     async def test_typed_numbers_work(self):

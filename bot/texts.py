@@ -475,6 +475,19 @@ def ask_same_father_all(subject: str | None, count: int) -> str:
 
 
 COUNTED_NONE_NOTED = "Righto — noted."
+
+#: One wrong name should cost one name. Re-asking for the whole list to fix
+#: a single typo is how three correct answers get lost with the fourth.
+COUNT_FIX = "✏️ {name}"
+COUNT_START_OVER = "Start the whole list again"
+
+
+def count_fix_ask(name: str) -> str:
+    return f"Fixing {name} — type the right name and I'll swap just that one."
+
+
+def count_fixed(was: str, now: str) -> str:
+    return f"Changed {was} to {now}."
 NEXT_ANOTHER_SIBLING = "Add another brother or sister"
 NEXT_ANOTHER_CHILD = "Add another child"
 NEXT_SPOUSE_OF = "Add {name}'s husband or wife"

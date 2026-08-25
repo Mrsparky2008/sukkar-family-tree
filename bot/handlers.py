@@ -1355,16 +1355,16 @@ async def _counted_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if father:
             spec["father"] = father
             sentence += f", and their father is {father}"
-    await _say(
-        update,
-        f"{texts.CONFIRM_CHECK}\n\n{sentence}. Correct?",
-        _kb(
-            [
-                [_button(texts.CONFIRM_CORRECT, f"{CB_COUNT}:keep")],
-                [_button(texts.CONFIRM_CHANGE, f"{CB_COUNT}:redo")],
-            ]
-        ),
-    )
+    # A button per name. One wrong name used to cost the whole list: the
+    # counts and every other name went with it, so three right answers were
+    # thrown away to fix a fourth.
+    rows = [[_button(texts.CONFIRM_CORRECT, f"{CB_COUNT}:keep")]]
+    for index, (_sex, name) in enumerate(spec["names"]):
+        rows.append(
+            [_button(texts.COUNT_FIX.format(name=name), f"{CB_COUNT}:fix:{index}")]
+        )
+    rows.append([_button(texts.COUNT_START_OVER, f"{CB_COUNT}:redo")])
+    await _say(update, f"{texts.CONFIRM_CHECK}\n\n{sentence}. Correct?", _kb(rows))
     return COUNTED
 
 
@@ -1413,6 +1413,12 @@ async def on_counted_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return await _ask_counted_name(update, context)
     if parts[1] == "keep":
         return await _counted_commit(update, context)
+    if parts[1] == "fix":
+        index = int(parts[2])
+        if 0 <= index < len(spec.get("names", [])):
+            spec["fixing"] = index
+            await _say(update, texts.count_fix_ask(spec["names"][index][1]))
+        return COUNTED
     if parts[1] == "redo":
         spec["counts"] = {}
         spec["names"] = []
@@ -1432,6 +1438,19 @@ async def on_counted_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def on_counted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     typed = (update.effective_message.text or "").strip()
     spec = _counted(context)
+
+    fixing = spec.get("fixing")
+    if fixing is not None:
+        try:
+            corrected = flows.clean_name(typed)
+        except flows.FlowError as problem:
+            await _say(update, str(problem))
+            return COUNTED
+        sex, was = spec["names"][fixing]
+        spec["names"][fixing] = (sex, corrected)
+        spec.pop("fixing", None)
+        await _say(update, texts.count_fixed(was, corrected))
+        return await _counted_confirm(update, context)
 
     if spec.get("queue"):
         if understand.is_skip(typed):
