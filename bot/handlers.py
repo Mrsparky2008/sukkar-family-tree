@@ -418,6 +418,12 @@ async def _show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lead: s
     name = texts.tagged(cursor["label"], cursor.get("person_id")) if cursor else None
 
     who = await store.contributor_state(update.effective_user.id)
+    # Every flow adds relatives *for* somebody, and for a contributor who
+    # has not introduced themselves that somebody does not exist. Their
+    # work would queue up pointing at nobody and could never be approved.
+    stranger = await _sign_in_first(update, context)
+    if stranger is not None:
+        return stranger
     relation = (
         await _relation_of(update, context, who, cursor) if cursor else None
     )
@@ -492,7 +498,11 @@ async def _ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     if step.optional:
         rows.append([_button(texts.SKIP, CB_SKIP)])
-    rows.append([_button(texts.CANCEL, CB_CANCEL)])
+    # Signing in has nowhere to cancel to. Offering it dropped people into
+    # the menu with no identity, and everything they added afterwards
+    # anchored to nobody.
+    if flow.kind != submissions.IDENTIFY:
+        rows.append([_button(texts.CANCEL, CB_CANCEL)])
 
     await _say(update, step.text(state["answers"]), _kb(rows))
     return ASK
@@ -1462,9 +1472,26 @@ async def on_counted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================================================================
 
 
+async def _sign_in_first(update, context) -> int | None:
+    """Send anyone the tree cannot attach work to back to the beginning.
+
+    Drawing the menu is guarded, but a menu already on the screen outlives
+    the guard — a stale button from before a restart is exactly how someone
+    keeps adding people the queue can never place."""
+    who = await store.contributor_state(update.effective_user.id)
+    if who["person_id"] is not None or who["identify_submission_id"] is not None:
+        return None
+    await _say(update, texts.SIGN_IN_FIRST)
+    _begin(context, flows.IDENTIFY)
+    return await _ask(update, context)
+
+
 async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    stranger = await _sign_in_first(update, context)
+    if stranger is not None:
+        return stranger
     choice = query.data.split(":", 1)[1]
 
     if choice == "view":
@@ -3024,6 +3051,9 @@ async def _show_sketch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def on_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """The menu is where people rest, so it is where they start typing."""
+    stranger = await _sign_in_first(update, context)
+    if stranger is not None:
+        return stranger
     typed = update.effective_message.text or ""
     if _asks_for_sketch(typed) and not dictation.looks_like_dictation(typed):
         return await _show_sketch(update, context)

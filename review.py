@@ -51,6 +51,19 @@ def resolve_subject(conn: sqlite3.Connection, payload: dict[str, Any]) -> int | 
     if about.get("person_id"):
         return int(about["person_id"])
 
+    # "Themselves", with nothing to point at. That is what a submission
+    # looks like when somebody reached a flow before introducing themselves,
+    # and it is recoverable: whoever sent it said it was about them, and the
+    # contributor record says who they turned out to be. Repairing it here
+    # rather than by hand means a whole chain hanging off one such entry
+    # becomes approvable the moment they sign in.
+    if not about.get("submission_id"):
+        submitter = (payload.get("submitted_by") or {}).get("telegram_user_id")
+        if submitter and (about.get("label") or "").strip().lower() == "themselves":
+            contributor = db.get_contributor(conn, int(submitter))
+            if contributor and contributor["linked_person_id"]:
+                return int(contributor["linked_person_id"])
+
     if about.get("submission_id"):
         parent = db.get_submission(conn, int(about["submission_id"]))
         if parent is None:

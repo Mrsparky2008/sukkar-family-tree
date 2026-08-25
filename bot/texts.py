@@ -97,6 +97,13 @@ IDENTITY_QUEUED = (
 
 IDENTITY_ALREADY_LINKED = "You're already in as {name}."
 
+#: Somebody who reached the menu without introducing themselves. Everything
+#: here is added *for* a person, so there is nothing useful they can do yet.
+SIGN_IN_FIRST = (
+    "Before we start — I need to know who you are, so what you add lands "
+    "in the right place. It's a few quick questions."
+)
+
 
 # --- the guided tour -------------------------------------------------------
 #

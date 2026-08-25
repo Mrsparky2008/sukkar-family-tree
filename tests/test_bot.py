@@ -1776,6 +1776,51 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
+class SignInIsNotOptionalTests(BotTestCase):
+    """Nobody reaches the menu without saying who they are.
+
+    Every flow adds relatives *for* somebody. Cancelling out of sign-in
+    left that somebody undefined, and a contributor spent a day and a half
+    entering thirty-five submissions that anchored to nobody and could
+    never be approved.
+    """
+
+    async def test_signing_in_offers_no_way_out(self):
+        chat = Conversation(user_id=99101)
+        await chat.start()
+        self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
+        self.assertNotIn(texts.CANCEL, chat.buttons, "a way to skip signing in")
+
+    async def test_a_stranger_at_the_menu_is_sent_back_to_sign_in(self):
+        from bot import handlers
+
+        chat = Conversation(user_id=99102)
+        await chat.start()
+        # However they got there — stray text, a stale button, a restart.
+        chat.state = await handlers._show_menu(chat._update("x"), chat.context)
+        self.assertIn(texts.SIGN_IN_FIRST, chat.transcript())
+        self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
+        self.assertNotIn(texts.MENU_ADD_PARENTS, chat.buttons)
+
+    async def test_a_stale_menu_button_does_not_get_through_either(self):
+        # Their phone still shows a menu from before. Tapping it must not
+        # start a flow that anchors to nobody.
+        from bot import handlers
+
+        chat = Conversation(user_id=99103)
+        await chat.start()
+        # What persistence restores after a restart: parked at the menu.
+        chat.state = handlers.MENU
+        await chat.tap_data("menu:add_sibling")
+        self.assertIn(texts.SIGN_IN_FIRST, chat.transcript())
+        self.assertIn(texts.ASK_SELF_GIVEN, chat.text)
+
+    async def test_somebody_signed_in_still_gets_their_menu(self):
+        chat = await self.identified_as_khalil()
+        self.assertIn(texts.MENU_ADD_SIBLING, chat.buttons)
+        self.assertNotIn(texts.SIGN_IN_FIRST, chat.text)
+
+
 class CornerReachTests(BotTestCase):
     """How far "your corner of the tree" reaches.
 

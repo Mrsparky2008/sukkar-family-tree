@@ -141,6 +141,64 @@ class ApprovalTests(ReviewTestCase):
         self.assertIsNotNone(row["resulting_person_id"])
 
 
+class OrphanedAnchorTests(ReviewTestCase):
+    """A submission about "themselves" that points at nobody.
+
+    That is what the queue holds when someone reached a flow before
+    introducing themselves. The claim is perfectly good — they said it was
+    about them — so it becomes approvable the moment the contributor is
+    linked to a person, without anybody editing stored payloads by hand.
+    """
+
+    def orphan(self, user=8123):
+        payload = S.build(
+            S.ADD_PARENTS,
+            submitted_by=S.submitter(user),
+            about=S.subject(label="themselves"),
+            people=[
+                S.person(S.FATHER, "Joe", sex="M"),
+                S.person(S.MOTHER, "Rima", sex="F"),
+            ],
+        )
+        return db.add_submission(self.conn, user, payload)
+
+    def test_it_cannot_be_approved_while_nobody_knows_who_sent_it(self):
+        sid = self.orphan()
+        with self.assertRaises(review.Blocked):
+            review.approve(self.conn, sid, reviewed_by=1, force=True)
+
+    def test_signing_in_afterwards_unlocks_it(self):
+        sid = self.orphan()
+        them = db.create_person(self.conn, "Sarkis", sex="M")
+        db.upsert_contributor(self.conn, 8123, linked_person_id=them)
+
+        review.approve(self.conn, sid, reviewed_by=1, force=True)
+        row = db.get_person(self.conn, them)
+        self.assertIsNotNone(row["father_id"], "their parents never attached")
+        self.assertEqual(
+            db.get_person(self.conn, row["father_id"])["given_name"], "Joe"
+        )
+
+    def test_a_whole_chain_comes_back_with_it(self):
+        # The shape that actually happened: everything hanging off one
+        # unanchored entry.
+        first = self.orphan()
+        them = db.create_person(self.conn, "Sarkis", sex="M")
+        db.upsert_contributor(self.conn, 8123, linked_person_id=them)
+        review.approve(self.conn, first, reviewed_by=1, force=True)
+
+        second = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "George", sex="M")],
+            S.subject(submission_id=first, label="Joe"),
+            user=8123,
+        )
+        made = review.approve(self.conn, second, reviewed_by=1, force=True)
+        self.assertEqual(
+            db.get_person(self.conn, made[0])["given_name"], "George"
+        )
+
+
 class FathersNameTests(ReviewTestCase):
     """A person born into the family carries their father's family name.
 
