@@ -671,13 +671,69 @@ function fit() {
 
 let dragging = false, last = null, pinch = null;
 
+// Every finger currently on the glass. A phone never fires a wheel event,
+// and `touch-action: none` turns the browser's own pinch off, so without
+// this there is no way to zoom on a phone at all.
+const pointers = new Map();
+let downAt = null;
+
+function centroid() {
+  const points = [...pointers.values()];
+  return {
+    x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+    y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+  };
+}
+
+function spread() {
+  const [a, b] = [...pointers.values()];
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+function zoomAbout(clientX, clientY, next) {
+  const box = canvas.getBoundingClientRect();
+  const mx = clientX - box.left, my = clientY - box.top;
+  view.x = mx - (mx - view.x) * (next / view.k);
+  view.y = my - (my - view.y) * (next / view.k);
+  view.k = next;
+}
+
+const clampZoom = k => Math.min(3, Math.max(0.12, k));
+
 canvas.addEventListener("pointerdown", e => {
-  dragging = true; last = { x: e.clientX, y: e.clientY };
-  canvas.classList.add("dragging");
   canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (pointers.size === 1) {
+    dragging = true;
+    last = { x: e.clientX, y: e.clientY };
+    downAt = { x: e.clientX, y: e.clientY };
+    canvas.classList.add("dragging");
+  } else if (pointers.size === 2) {
+    // A second finger turns a drag into a pinch, and neither is a tap.
+    dragging = false;
+    downAt = null;
+    pinch = { distance: spread(), at: centroid() };
+  }
 });
 
 canvas.addEventListener("pointermove", e => {
+  if (!pointers.has(e.pointerId)) return;
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size >= 2) {
+    if (!pinch) return;
+    const distance = spread(), at = centroid();
+    if (pinch.distance > 0) {
+      zoomAbout(at.x, at.y, clampZoom(view.k * (distance / pinch.distance)));
+    }
+    // Two fingers travelling together move the chart as well as scale it.
+    view.x += at.x - pinch.at.x;
+    view.y += at.y - pinch.at.y;
+    pinch = { distance, at };
+    draw();
+    return;
+  }
+
   if (!dragging || !last) return;
   view.x += e.clientX - last.x;
   view.y += e.clientY - last.y;
@@ -685,21 +741,38 @@ canvas.addEventListener("pointermove", e => {
   draw();
 });
 
-canvas.addEventListener("pointerup", e => {
+function release(e) {
+  pointers.delete(e.pointerId);
+  if (pointers.size < 2) pinch = null;
+
+  if (pointers.size === 1) {
+    // One finger lifted out of a pinch: carry on panning with the other.
+    const [only] = [...pointers.values()];
+    last = { x: only.x, y: only.y };
+    dragging = true;
+    downAt = null;
+    return;
+  }
+  if (pointers.size > 0) return;
+
   canvas.classList.remove("dragging");
-  if (last && Math.abs(e.clientX - last.x) < 4) pick(e);
-  dragging = false; last = null;
-});
+  dragging = false;
+  // A tap is a press that barely moved. Comparing against the last move
+  // instead meant every release counted as a tap, so panning across the
+  // chart opened whoever you happened to let go over.
+  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) < 6) {
+    pick(e);
+  }
+  last = null;
+  downAt = null;
+}
+
+canvas.addEventListener("pointerup", release);
+canvas.addEventListener("pointercancel", release);
 
 canvas.addEventListener("wheel", e => {
   e.preventDefault();
-  const box = canvas.getBoundingClientRect();
-  const mx = e.clientX - box.left, my = e.clientY - box.top;
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  const next = Math.min(3, Math.max(0.12, view.k * factor));
-  view.x = mx - (mx - view.x) * (next / view.k);
-  view.y = my - (my - view.y) * (next / view.k);
-  view.k = next;
+  zoomAbout(e.clientX, e.clientY, clampZoom(view.k * Math.exp(-e.deltaY * 0.0015)));
   draw();
 }, { passive: false });
 
