@@ -141,6 +141,76 @@ class ApprovalTests(ReviewTestCase):
         self.assertIsNotNone(row["resulting_person_id"])
 
 
+class FathersNameTests(ReviewTestCase):
+    """A person born into the family carries their father's family name.
+
+    Not the canonical spelling: his. Defaulting to the tree's own spelling
+    gave a man's children a different surname from his, and gave a daughter's
+    husband's children the wrong family altogether.
+    """
+
+    def couple(self, husband="Sami", wife="Rima", spelling=None, hers=None):
+        him = db.create_person(self.conn, husband, sex="M", family_name=spelling)
+        her = db.create_person(self.conn, wife, sex="F", family_name=hers)
+        db.create_union(self.conn, him, her)
+        return him, her
+
+    def add_child(self, parent_id, name="Fares", family_name=None):
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, name, sex="M", family_name=family_name)],
+            S.subject(person_id=parent_id, label="parent"),
+        )
+        return review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+
+    def test_a_child_takes_the_fathers_spelling_not_the_canonical_one(self):
+        him, _her = self.couple(spelling="SPELLING-B")
+        child = db.get_person(self.conn, self.add_child(him))
+        self.assertEqual(child["family_name"], "SPELLING-B")
+
+    def test_a_child_told_under_the_mother_still_gets_both_parents(self):
+        him, her = self.couple()
+        child = db.get_person(self.conn, self.add_child(her))
+        self.assertEqual(child["mother_id"], her)
+        self.assertEqual(child["father_id"], him, "the father was never linked")
+
+    def test_a_child_of_a_husband_who_married_in_is_his_family(self):
+        # The case that made a Tarabay boy a member of this family.
+        him = db.create_person(self.conn, "Jamil", sex="M", family_name="Tarabay")
+        her = db.create_person(self.conn, "Saide", sex="F")
+        db.create_union(self.conn, him, her)
+        child = db.get_person(self.conn, self.add_child(her, name="Massoud"))
+        self.assertEqual(child["family_name"], "Tarabay")
+        self.assertEqual(child["father_id"], him)
+
+    def test_what_the_contributor_actually_typed_still_wins(self):
+        him, _her = self.couple(spelling="SPELLING-B")
+        child = db.get_person(
+            self.conn, self.add_child(him, family_name="Something-Else")
+        )
+        self.assertEqual(child["family_name"], "Something-Else")
+
+    def test_a_lone_parent_with_no_spouse_is_left_alone(self):
+        her = db.create_person(self.conn, "Rima", sex="F")
+        child = db.get_person(self.conn, self.add_child(her))
+        self.assertEqual(child["mother_id"], her)
+        self.assertIsNone(child["father_id"], "invented a father")
+
+    def test_a_sibling_takes_the_fathers_spelling_too(self):
+        him, her = self.couple(spelling="SPELLING-B")
+        eldest = db.create_person(
+            self.conn, "Sarkis", sex="M", father_id=him, mother_id=her,
+            family_name="SPELLING-B",
+        )
+        sid = self.queue(
+            S.ADD_SIBLING,
+            [S.person(S.SIBLING, "Tanios", sex="M")],
+            S.subject(person_id=eldest, label="Sarkis"),
+        )
+        made = review.approve(self.conn, sid, reviewed_by=1, force=True)[0]
+        self.assertEqual(db.get_person(self.conn, made)["family_name"], "SPELLING-B")
+
+
 class DependencyTests(ReviewTestCase):
     """A contributor can name a grandfather before the father is approved."""
 

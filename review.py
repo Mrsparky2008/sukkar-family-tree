@@ -123,6 +123,23 @@ def _create(
 # ---------------------------------------------------------------------------
 
 
+def _fathers_name(conn: sqlite3.Connection, father: sqlite3.Row | None,
+                  entry: dict[str, Any]) -> dict[str, Any]:
+    """A person born into the family carries their father's family name.
+
+    Not the tree's canonical spelling — his. He may be the one who spells it
+    the way the Australian paperwork does, and his children's papers follow
+    his, not the village's. And when a daughter's husband married in from
+    another family entirely, their children are his family, not this one.
+
+    Only ever fills a blank: whatever the contributor actually typed wins,
+    and the stored payload is never touched — this is a copy.
+    """
+    if entry.get("family_name") or father is None or not father["family_name"]:
+        return entry
+    return {**entry, "family_name": father["family_name"]}
+
+
 def _approval_note(edits, unknown_house: str | None) -> str | None:
     parts = []
     if edits:
@@ -262,7 +279,11 @@ def approve(
             if subject_id is None:
                 raise Blocked("no subject — cannot tell whose sibling this is")
             subject = db.get_person(conn, subject_id)
-            primary = place(entries[0], True)
+            father = (
+                db.get_person(conn, subject["father_id"])
+                if subject["father_id"] else None
+            )
+            primary = place(_fathers_name(conn, father, entries[0]), True)
             # A sibling shares parents. When merging, only fill gaps — never
             # overwrite what an admin already recorded.
             existing = db.get_person(conn, primary)
@@ -284,11 +305,34 @@ def approve(
             if subject_id is None:
                 raise Blocked("no subject — cannot tell whose child this is")
             subject = db.get_person(conn, subject_id)
-            primary = place(entries[0], True)
-            column = "father_id" if subject["sex"] == "M" else "mother_id"
+            # A child is told to us under one parent, but they have two, and
+            # the tree already knows who the other is when the couple is on
+            # the record. Linking only the parent we were told about left a
+            # child with no father — and so no family name of his own, and no
+            # house to inherit.
+            partners = db.get_partners(conn, subject_id)
+            other = partners[0] if len(partners) == 1 else None
+            if subject["sex"] == "M":
+                father = subject
+            elif other is not None and other["sex"] == "M":
+                father = other
+            else:
+                father = None
+
+            primary = place(_fathers_name(conn, father, entries[0]), True)
             existing = db.get_person(conn, primary)
+            links = {}
+            column = "father_id" if subject["sex"] == "M" else "mother_id"
             if not existing[column]:
-                db.update_person(conn, primary, **{column: subject_id})
+                links[column] = subject_id
+            if other is not None:
+                other_column = (
+                    "father_id" if other["sex"] == "M" else "mother_id"
+                )
+                if other_column != column and not existing[other_column]:
+                    links[other_column] = other["id"]
+            if links:
+                db.update_person(conn, primary, **links)
 
         else:
             raise Blocked(f"do not know how to apply {kind!r}")
