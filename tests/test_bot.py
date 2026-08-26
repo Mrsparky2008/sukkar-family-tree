@@ -2402,3 +2402,62 @@ class ASpellingRunsDownTheLineTests(BotTestCase):
         # Never the ones who answered for themselves.
         self.assertNotIn(self.spoken, touched)
         self.assertNotIn(self.spokens_son, touched)
+
+
+class AlreadySpelledThatWayTests(BotTestCase):
+    """Typing the spelling that is already there is not a mistake.
+
+    Somebody who does it has usually noticed the line below them disagrees,
+    and a name fix is the only tool that says so. Refusing with "it already
+    says that" answers a question they were not asking and leaves them with
+    nowhere to go — the offer they wanted is only reachable as the tail of a
+    change, and there is no change left to make.
+    """
+
+    def setUp(self):
+        super().setUp()
+        conn = db.connect()
+        self.father = self.ids["khalil_y"]
+        db.set_family_name(conn, self.father, "Sukar", self_reported=False)
+        self.son = db.create_person(
+            conn, "Toufic", family_name="Sukkar", sex="M", father_id=self.father
+        )
+        conn.commit()
+        conn.close()
+
+    async def retype_what_it_says(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.say(str(self.father))
+        await chat.tap(texts.NAME_FIX_FAMILY)
+        await chat.say("Sukar")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        return chat
+
+    async def test_it_says_so_plainly(self):
+        chat = await self.retype_what_it_says()
+        self.assertIn("already spelled Sukar", chat.transcript())
+
+    async def test_and_offers_the_line_that_disagrees(self):
+        chat = await self.retype_what_it_says()
+        self.assertIn(texts.NAME_FIX_ALSO_YES, chat.buttons)
+        self.assertIn("Toufic", chat.text)
+
+    async def test_the_offer_works_from_there(self):
+        chat = await self.retype_what_it_says()
+        await chat.tap(texts.NAME_FIX_ALSO_YES)
+        self.assertEqual(self.person(self.son)["family_name"], "Sukar")
+
+    async def test_a_line_that_agrees_gets_no_pointless_question(self):
+        conn = db.connect()
+        for child in db.get_children(conn, self.father):
+            db.set_family_name(conn, child["id"], "Sukar", self_reported=False)
+        conn.commit()
+        conn.close()
+        chat = await self.retype_what_it_says()
+        self.assertNotIn(texts.NAME_FIX_ALSO_YES, chat.buttons)
+
+    async def test_nothing_is_left_sitting_in_the_queue(self):
+        await self.retype_what_it_says()
+        self.assertEqual(self.queued()[-1]["status"], "rejected")

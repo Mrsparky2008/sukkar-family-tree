@@ -711,6 +711,16 @@ def name_fix_done(who: str) -> str:
     )
 
 
+def name_fix_already(who: str, spelling: str) -> str:
+    """They are already spelled that way.
+
+    Not an error to report back. Somebody who types the spelling that is
+    already there has usually noticed the line below them disagrees, and
+    this is the only tool that says so.
+    """
+    return f"{who} is already spelled {spelling}."
+
+
 def name_fix_also_ask(now: str, names: str, count: int) -> str:
     """Offer the same spelling to everyone who inherited the old one.
 
@@ -719,10 +729,12 @@ def name_fix_also_ask(now: str, names: str, count: int) -> str:
     spelling was wrong rather than different, everyone below him is still
     wearing the mistake.
     """
-    who = "one other person" if count == 1 else f"{count} other people"
+    who = "One person" if count == 1 else f"{count} people"
+    verb = "spells" if count == 1 else "spell"
     return (
-        f"{who} below them still spell it the old way — nobody has said so "
-        f"themselves, they just took it from the entry you've just fixed:\n\n"
+        f"{who} below them {verb} it differently, and none of them has ever "
+        f"answered for their own name — they just took what was on the entry "
+        f"above them:\n\n"
         f"{names}\n\n"
         f"Spell them {now} too?"
     )

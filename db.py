@@ -1520,9 +1520,9 @@ def standing_name_author(
 
 
 def inherited_spelling(
-    conn: sqlite3.Connection, person_id: int, old_spelling: str
+    conn: sqlite3.Connection, person_id: int, spelling: str
 ) -> list[sqlite3.Row]:
-    """Descendants down the father chain still carrying the old spelling.
+    """Descendants down the father chain not spelling it the way he does.
 
     A family name is stored on each person, not derived from the father, and
     deliberately so: this family really does spell it several ways, and one
@@ -1535,7 +1535,7 @@ def inherited_spelling(
     so is anyone already spelling it some third way, because that is a
     separate claim, not this one.
     """
-    if not old_spelling:
+    if not spelling:
         return []
     found: list[sqlite3.Row] = []
     frontier = [person_id]
@@ -1556,8 +1556,14 @@ def inherited_spelling(
                     # just skips them.
                     following.pop()
                     continue
-                if (child["family_name"] or "") == old_spelling:
-                    found.append(child)
+                carried = child["family_name"] or ""
+                if carried == spelling:
+                    continue
+                # Only spellings of this family's own name. A son who took
+                # another surname entirely did not inherit a typo.
+                if canonical_family_name(carried, conn) != config.FAMILY_NAME:
+                    continue
+                found.append(child)
         frontier = following
     return found
 

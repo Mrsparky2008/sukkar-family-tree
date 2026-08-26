@@ -1569,17 +1569,13 @@ class FixingANameTests(ReviewTestCase):
                 now="12",
             )
 
-    def test_a_fix_that_changes_nothing_is_refused(self):
-        with self.assertRaises(ValueError):
-            S.build(
-                S.NAME_FIX,
-                submitted_by=S.submitter(8001),
-                about=S.subject(person_id=self.her, label="Martha"),
-                target_person_id=self.her,
-                field="family_name",
-                was="Allam",
-                now="Allam",
-            )
+    def test_a_fix_that_changes_nothing_is_refused_with_a_reason(self):
+        # Not malformed — somebody typing what is already there. The queue
+        # takes it; the reviewer says so rather than crashing on it.
+        sid = self.fix("family_name", "Allam")
+        with self.assertRaises(review.Blocked) as caught:
+            review.approve(self.conn, sid, reviewed_by=1)
+        self.assertIn("already", str(caught.exception))
 
     def test_a_fix_overtaken_by_another_is_refused_not_reverted(self):
         sid = self.fix("family_name", "Alam")
@@ -1739,3 +1735,82 @@ class ACorrectionWaitsForSomebodyCloserTests(ReviewTestCase):
         self.assertEqual(
             db.get_person(self.conn, self.her)["family_name"], "Alam"
         )
+
+
+class ASpellingRunsDownwardOnlyTests(ReviewTestCase):
+    """Down the father chain, and nowhere else.
+
+    A spelling is something a man's papers gave his children. It never runs
+    upward to his father, sideways to his brothers, across to his wife, or
+    through a daughter to her children — they carry their husband's name,
+    not hers. Getting this wrong would rewrite half the tree from one tap.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.grandfather = db.create_person(
+            self.conn, "Sarkis", family_name="Sukkar", sex="M"
+        )
+        self.me = db.create_person(
+            self.conn, "Kalim", family_name="Sukkar", sex="M",
+            father_id=self.grandfather,
+        )
+        self.brother = db.create_person(
+            self.conn, "Toufic", family_name="Sukkar", sex="M",
+            father_id=self.grandfather,
+        )
+        self.wife = db.create_person(
+            self.conn, "Wadiha", family_name="Sukkar", sex="F"
+        )
+        db.create_union(self.conn, self.me, self.wife)
+        self.son = db.create_person(
+            self.conn, "Steven", family_name="Sukkar", sex="M",
+            father_id=self.me, mother_id=self.wife,
+        )
+        self.grandson = db.create_person(
+            self.conn, "Henri", family_name="Sukkar", sex="M", father_id=self.son
+        )
+        self.daughter = db.create_person(
+            self.conn, "Nawal", family_name="Sukkar", sex="F", father_id=self.me
+        )
+        self.daughters_son = db.create_person(
+            self.conn, "Diab", family_name="Sukkar", sex="M",
+            mother_id=self.daughter,
+        )
+        self.swept = {
+            row["id"] for row in db.inherited_spelling(self.conn, self.me, "Sukar")
+        }
+
+    def test_children_and_grandchildren_are_caught(self):
+        self.assertIn(self.son, self.swept)
+        self.assertIn(self.grandson, self.swept)
+
+    def test_a_daughter_is_caught_but_not_her_children(self):
+        # She is his child, so his papers are hers. Her son's name came from
+        # his own father, whoever that is.
+        self.assertIn(self.daughter, self.swept)
+        self.assertNotIn(self.daughters_son, self.swept)
+
+    def test_it_never_runs_upward(self):
+        self.assertNotIn(self.grandfather, self.swept)
+
+    def test_it_never_runs_sideways(self):
+        self.assertNotIn(self.brother, self.swept)
+
+    def test_a_wife_keeps_her_own_name(self):
+        self.assertNotIn(self.wife, self.swept)
+
+    def test_a_woman_changing_hers_moves_nobody(self):
+        # Her children hang off their father, so there is no chain to walk.
+        self.assertEqual(
+            db.inherited_spelling(self.conn, self.daughter, "Sukar"), []
+        )
+
+    def test_a_line_that_took_another_surname_is_left_alone(self):
+        outside = db.create_person(
+            self.conn, "Massoud", family_name="Tarabay", sex="M", father_id=self.son
+        )
+        swept = {
+            row["id"] for row in db.inherited_spelling(self.conn, self.me, "Sukar")
+        }
+        self.assertNotIn(outside, swept)

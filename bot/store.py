@@ -520,6 +520,50 @@ def _review_name_fix(
             "outreach": outreach,
         }
 
+    person = db.get_person(conn, int(person_id))
+
+    # Already spelled that way. That is not a mistake to report — it is
+    # somebody who has noticed the line below them disagrees and reached for
+    # the only tool that says so. Answer the question they were asking.
+    if (
+        person is not None
+        and payload.get("field") == "family_name"
+        and person["family_name"] == payload.get("now")
+    ):
+        already = db.inherited_spelling(
+            conn, int(person_id), payload.get("now") or ""
+        )
+        db.resolve_submission(
+            conn, submission_id, "rejected", SYSTEM_REVIEWER,
+            review_note="already spelled that way",
+        )
+        if not already:
+            return {
+                "tier": "green",
+                "created": [],
+                "message": texts.name_fix_already(
+                    texts.tagged(db.row_display_name(person), int(person_id)),
+                    payload.get("now"),
+                ),
+            }
+        return {
+            "tier": "green",
+            "created": [],
+            "message": texts.name_fix_already(
+                texts.tagged(db.row_display_name(person), int(person_id)),
+                payload.get("now"),
+            ),
+            "also": {
+                "field": "family_name",
+                "was": None,
+                "now": payload.get("now"),
+                "people": [
+                    {"person_id": row["id"], "label": db.row_display_name(row)}
+                    for row in already
+                ],
+            },
+        }
+
     try:
         review.approve(conn, submission_id, SYSTEM_REVIEWER)
     except review.Blocked as blocked:
@@ -539,7 +583,7 @@ def _review_name_fix(
     # papers do not overrule his brother's.
     if payload.get("field") == "family_name":
         inherited = db.inherited_spelling(
-            conn, int(person_id), payload.get("was") or ""
+            conn, int(person_id), payload.get("now") or ""
         )
         if inherited:
             verdict["also"] = {
@@ -662,8 +706,11 @@ def _spell_the_line(
     changed: list[dict[str, Any]] = []
     for person_id in person_ids:
         person = db.get_person(conn, person_id)
-        if person is None or person["family_name"] != was:
+        if person is None or person["family_name"] == now:
             continue
+        if was is not None and person["family_name"] != was:
+            continue
+        was_here = person["family_name"]
         payload = submissions.build(
             submissions.NAME_FIX,
             submitted_by=submissions.submitter(
@@ -676,7 +723,7 @@ def _spell_the_line(
             ),
             target_person_id=person_id,
             field="family_name",
-            was=was,
+            was=was_here,
             now=now,
         )
         submission_id = db.add_submission(conn, telegram_user_id, payload)

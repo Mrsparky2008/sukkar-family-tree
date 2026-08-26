@@ -261,8 +261,11 @@ def validate(payload: dict[str, Any]) -> list[str]:
             problems.append(f"not a name that can be fixed: {payload.get('field')!r}")
         if not payload.get("now"):
             problems.append("a name fix must say what it should say")
-        elif payload.get("now") == payload.get("was"):
-            problems.append("that is what it already says")
+        # `now == was` is deliberately allowed through. It is not a malformed
+        # payload, it is somebody typing the spelling that is already there —
+        # usually because the line below them disagrees and this is the only
+        # tool that says so. Refusing it here turns that into a dead end;
+        # answering it needs the tree, so it is answered where the tree is.
     elif not entries:
         problems.append(f"{kind} needs at least one person")
 
