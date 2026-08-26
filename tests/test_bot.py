@@ -2181,3 +2181,62 @@ class FixingANameFromThePhoneTests(BotTestCase):
         payload = self.queued()[-1]["payload"]
         self.assertEqual(payload["people"], [])
         self.assertNotIn("father_id", payload)
+
+
+class ANumberIsAWayInTests(BotTestCase):
+    """The question offers a number, so a number has to work.
+
+    Only a handful of relatives fit on buttons, and numbers are the whole
+    point of having them: half the family answers to the same given names,
+    and #27 can only ever mean one man. Offering something the code then
+    refuses is worse than not offering it at all.
+    """
+
+    async def open_the_list(self, user_id: int = 5001):
+        chat = await self.identified_as_khalil(user_id)
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        return chat
+
+    async def test_a_typed_number_picks_that_person(self):
+        chat = await self.open_the_list()
+        await chat.say(str(self.ids["boutros"]))
+        self.assertIn("Boutros", chat.text)
+        self.assertIn(texts.NAME_FIX_GIVEN, chat.buttons)
+
+    async def test_a_hash_in_front_is_fine(self):
+        chat = await self.open_the_list()
+        await chat.say(f"#{self.ids['boutros']}")
+        self.assertIn("Boutros", chat.text)
+
+    async def test_somebody_off_the_button_list_is_reachable(self):
+        # The buttons only hold the immediate circle. A number has to reach
+        # everyone else, or it is not doing the job it was offered for.
+        chat = await self.open_the_list()
+        self.assertNotIn("Layla", str(chat.buttons))
+        await chat.say(str(self.ids["layla"]))
+        self.assertIn("Layla", chat.text)
+
+    async def test_a_number_nobody_has_says_so_and_stays_put(self):
+        chat = await self.open_the_list()
+        await chat.say("9999")
+        self.assertIn("9999", chat.text)
+        await chat.say(str(self.ids["boutros"]))
+        self.assertIn("Boutros", chat.text)
+
+    async def test_words_get_a_nudge_not_a_dead_end(self):
+        chat = await self.open_the_list()
+        await chat.say("my uncle")
+        self.assertIn(texts.NAME_FIX_NOT_A_NUMBER, chat.text)
+        await chat.say(str(self.ids["boutros"]))
+        self.assertIn("Boutros", chat.text)
+
+    async def test_it_carries_through_to_the_change(self):
+        chat = await self.open_the_list()
+        await chat.say(str(self.ids["boutros"]))
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        await chat.say("Butros")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        self.assertEqual(
+            self.person(self.ids["boutros"])["given_name"], "Butros"
+        )

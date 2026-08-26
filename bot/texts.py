@@ -654,7 +654,14 @@ FIX_TREE_ASK = (
 NAME_FIX_MENU = "✏️ Fix a name"
 
 NAME_FIX_NOBODY = (
-    "Tell me who first — tap a name on the tree, or send me their number."
+    "Whose name needs fixing?\n\n"
+    "Tap somebody below, or send me their number from the tree — the one "
+    "shown beside their name, like 27."
+)
+
+NAME_FIX_NOT_A_NUMBER = (
+    "Send just the number beside their name on the tree — 27, say — or tap "
+    "one of the names above."
 )
 
 

@@ -3028,6 +3028,11 @@ async def _pick_name_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if len(rows) >= 8:
             break
     rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
+    # The list is their own circle, one tap each. A number is how everyone
+    # else is reached, so this state has to listen for one as well as for a
+    # tap — the question offers it, and a question that offers something the
+    # code does not accept is worse than not offering it.
+    context.user_data["awaiting_name_target"] = True
     await _say(update, texts.NAME_FIX_NOBODY, _kb(rows))
     return PICK_SUBMISSION
 
@@ -3037,7 +3042,9 @@ async def _start_name_fix(
 ):
     target = await store.name_fix_target(update.effective_user.id, person_id)
     if target is None:
-        return await _show_menu(update, context, texts.ERROR)
+        await _say(update, texts.fix_id_unknown(str(person_id)))
+        return PICK_SUBMISSION
+    context.user_data.pop("awaiting_name_target", None)
 
     _begin(
         context,
@@ -3186,6 +3193,25 @@ async def on_menu_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await _absorb_dictation(update, context, reading)
         return await _show_menu(update, context, texts.DICTATED_NOTHING)
     return await _show_menu(update, context, texts.MENU_TYPE_HINT)
+
+
+async def on_pick_submission_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A number typed where we offered one: whose name to fix.
+
+    Numbers are the only unambiguous way to name somebody here, so this
+    accepts anyone on the tree — not only the handful of relatives that fit
+    on the buttons. Anything that is not a number falls through to the usual
+    nudge.
+    """
+    if not context.user_data.get("awaiting_name_target"):
+        return await on_stray_text(update, context)
+
+    typed = (update.effective_message.text or "").strip().lstrip("#").strip()
+    if not typed.isdigit():
+        await _say(update, texts.NAME_FIX_NOT_A_NUMBER)
+        return PICK_SUBMISSION
+
+    return await _start_name_fix(update, context, int(typed))
 
 
 async def on_stray_text(update: Update, context: ContextTypes.DEFAULT_TYPE):

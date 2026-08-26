@@ -148,6 +148,7 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             handlers.PICK_SUBMISSION: [
                 CallbackQueryHandler(handlers.on_pick_submission, pattern=r"^fix:"),
                 cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_pick_submission_text),
             ],
             handlers.REVIEW_DESK: [
                 CallbackQueryHandler(
