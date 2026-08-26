@@ -71,6 +71,13 @@ class BotTestCase(unittest.IsolatedAsyncioTestCase):
         finally:
             conn.close()
 
+    def person(self, person_id: int):
+        conn = db.connect()
+        try:
+            return db.get_person(conn, person_id)
+        finally:
+            conn.close()
+
     async def identified_as_khalil(self, user_id: int = 5001) -> Conversation:
         """A contributor who has signed up and linked to a seeded person."""
         chat = Conversation(user_id=user_id)
@@ -2110,3 +2117,67 @@ class HouseSignInTests(BotTestCase):
         await chat.tap(texts.SELF_MAN)
 
         self.assertIn(texts.IDENTITY_GUESS, chat.text)
+
+
+class FixingANameFromThePhoneTests(BotTestCase):
+    """A relative who can see a name is wrong can now change it.
+
+    The old correction flow asked for a description and left the relative
+    waiting on an admin. A name is narrow enough to hand back to the person
+    who knows it: three columns, one person, no link touched. Who gets to
+    change it is settled by closeness, which the tree already knows.
+    """
+
+    async def test_the_button_is_there(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        self.assertIn(texts.NAME_FIX_MENU, chat.buttons)
+
+    async def test_a_close_relative_respells_them_on_the_spot(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.tap("your father")
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        await chat.say("Yousef")
+        await chat.tap(texts.CONFIRM_CORRECT)
+
+        queued = self.queued()[-1]
+        self.assertEqual(queued["payload"]["kind"], submissions.NAME_FIX)
+        self.assertEqual(queued["status"], "approved")
+        person = self.person(queued["payload"]["target_person_id"])
+        self.assertEqual(person["given_name"], "Yousef")
+
+    async def test_what_it_said_before_is_kept(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.tap("your father")
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        await chat.say("Yousef")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        payload = self.queued()[-1]["payload"]
+        self.assertEqual(payload["was"], "Youssef")
+        self.assertEqual(payload["now"], "Yousef")
+
+    async def test_the_question_shows_what_it_says_now(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.tap("your father")
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        self.assertIn("Youssef", chat.text)
+
+    async def test_nobody_is_moved_between_parents(self):
+        chat = await self.identified_as_khalil()
+        before = self.people_count()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.tap("your father")
+        await chat.tap(texts.NAME_FIX_FAMILY)
+        await chat.say("Soukkar")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        self.assertEqual(self.people_count(), before)
+        payload = self.queued()[-1]["payload"]
+        self.assertEqual(payload["people"], [])
+        self.assertNotIn("father_id", payload)

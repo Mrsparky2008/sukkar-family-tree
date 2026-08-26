@@ -644,6 +644,66 @@ FIX_TREE_ASK = (
 )
 
 
+# --- fixing a name -------------------------------------------------------
+#
+# Corrections used to be a note somebody read and acted on by hand, which
+# left a relative who knows a name is wrong with nothing to do but describe
+# it and wait. A name is the one thing narrow enough to fix directly: three
+# columns, one person, no links touched.
+
+NAME_FIX_MENU = "✏️ Fix a name"
+
+NAME_FIX_NOBODY = (
+    "Tell me who first — tap a name on the tree, or send me their number."
+)
+
+
+def name_fix_pick(who: str) -> str:
+    return (
+        f"Which name is wrong for {who}?\n\n"
+        "Only the spelling changes — who they're related to stays as it is."
+    )
+
+
+NAME_FIX_GIVEN = "First name"
+NAME_FIX_FAMILY = "Family name"
+NAME_FIX_ALIAS = "The name they go by"
+
+
+def name_fix_ask(what: str, current: str | None) -> str:
+    now = f"It says {current} at the moment." if current else "Nothing is recorded there yet."
+    return f"{now}\n\nWhat should the {what} be?"
+
+
+def name_fix_confirm(who: str, what: str, was: str | None, now: str) -> str:
+    return (
+        f"{who}\n\n"
+        f"{what}: {was or '(blank)'} → {now}\n\n"
+        "Have I got that right?"
+    )
+
+
+def name_fix_done(who: str) -> str:
+    return (
+        f"Done — {who}.\n\n"
+        "You're the closest person to them who's said anything about it, so "
+        "it's on the tree now. Anyone nearer can still correct it."
+    )
+
+
+def name_fix_outranked(mine: str, theirs: str) -> str:
+    return (
+        f"The name on record came from {theirs}, and you're {mine}. "
+        "I've asked them — if they agree, your correction goes on."
+    )
+
+
+NAME_FIX_QUEUED = (
+    "Thanks — that's with the family's admins.\n\n"
+    "Nothing on the tree changes until somebody's looked at it."
+)
+
+
 def fix_tree_about(people: str) -> str:
     return f"That's about: {people}."
 

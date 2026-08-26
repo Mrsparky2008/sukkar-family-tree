@@ -1512,3 +1512,230 @@ class EvidenceResolvesItsAnchorTests(ReviewTestCase):
         )
         row = db.get_submission(self.conn, sid)
         review.evidence(self.conn, db.submission_payload(row), sid)
+
+
+class FixingANameTests(ReviewTestCase):
+    """A wrong name should be fixable by the person who knows it is wrong.
+
+    Until now a correction was a note somebody read and acted on by hand, so
+    a relative who knew a maiden name was misspelled could only describe the
+    problem and wait. A name is narrow enough to fix directly: three columns
+    on one person, and nothing that moves anybody between parents.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.her = db.create_person(
+            self.conn, "Martha", family_name="Allam", sex="F"
+        )
+
+    def fix(self, field, now, user=8001, person_id=None):
+        payload = S.build(
+            S.NAME_FIX,
+            submitted_by=S.submitter(user),
+            about=S.subject(person_id=person_id or self.her, label="Martha"),
+            target_person_id=person_id or self.her,
+            field=field,
+            was=db.get_person(self.conn, person_id or self.her)[field],
+            now=now,
+        )
+        return db.add_submission(self.conn, user, payload)
+
+    def test_approving_it_respells_her(self):
+        sid = self.fix("family_name", "Alam")
+        review.approve(self.conn, sid, reviewed_by=1)
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["family_name"], "Alam"
+        )
+
+    def test_the_change_is_written_down(self):
+        sid = self.fix("family_name", "Alam")
+        review.approve(self.conn, sid, reviewed_by=1)
+        row = db.get_submission(self.conn, sid)
+        self.assertEqual(row["status"], "approved")
+        self.assertIn("Allam", row["review_note"])
+        self.assertIn("Alam", row["review_note"])
+
+    def test_it_cannot_move_anybody(self):
+        # The whole safety argument for applying these without an admin is
+        # that a name fix touches names and nothing else.
+        with self.assertRaises(ValueError):
+            S.build(
+                S.NAME_FIX,
+                submitted_by=S.submitter(8001),
+                about=S.subject(person_id=self.her, label="Martha"),
+                target_person_id=self.her,
+                field="father_id",
+                now="12",
+            )
+
+    def test_a_fix_that_changes_nothing_is_refused(self):
+        with self.assertRaises(ValueError):
+            S.build(
+                S.NAME_FIX,
+                submitted_by=S.submitter(8001),
+                about=S.subject(person_id=self.her, label="Martha"),
+                target_person_id=self.her,
+                field="family_name",
+                was="Allam",
+                now="Allam",
+            )
+
+    def test_a_fix_overtaken_by_another_is_refused_not_reverted(self):
+        sid = self.fix("family_name", "Alam")
+        db.set_family_name(self.conn, self.her, "Alame", self_reported=False)
+        with self.assertRaises(review.Blocked) as caught:
+            review.approve(self.conn, sid, reviewed_by=1)
+        self.assertIn("after this was sent", str(caught.exception))
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["family_name"], "Alame"
+        )
+
+    def test_their_own_answer_beats_somebody_elses_correction(self):
+        db.set_family_name(self.conn, self.her, "Allam", self_reported=True)
+        sid = self.fix("family_name", "Alam")
+        with self.assertRaises(review.Blocked):
+            review.approve(self.conn, sid, reviewed_by=1)
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["family_name"], "Allam"
+        )
+
+    def test_a_first_name_is_fixable_too(self):
+        sid = self.fix("given_name", "Marta")
+        review.approve(self.conn, sid, reviewed_by=1)
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["given_name"], "Marta"
+        )
+
+
+class CloserRelativesCarryMoreWeightTests(ReviewTestCase):
+    """Nobody here has a credential — only a position.
+
+    A granddaughter knows her own grandmother's maiden name; a cousin by
+    marriage is repeating something he heard once. The tree already knows
+    how near each of them stands, so closeness is what decides whether a
+    correction goes straight on or waits while the closer person is asked.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.grandmother = db.create_person(
+            self.conn, "Martha", family_name="Allam", sex="F"
+        )
+        self.parent = db.create_person(
+            self.conn, "Said", sex="M", mother_id=self.grandmother
+        )
+        self.granddaughter = db.create_person(
+            self.conn, "Sarah", sex="F", father_id=self.parent
+        )
+        self.outsider = db.create_person(self.conn, "Elias", sex="M")
+
+    def test_a_granddaughter_outranks_a_stranger(self):
+        weight = db.correction_weight(
+            self.conn, self.grandmother, self.granddaughter
+        )
+        self.assertEqual(weight["mine"], 2)
+        self.assertTrue(weight["outranks"])
+
+    def test_somebody_not_on_the_tree_outranks_nobody(self):
+        weight = db.correction_weight(self.conn, self.grandmother, None)
+        self.assertFalse(weight["outranks"])
+
+    def test_a_tie_goes_to_the_correction(self):
+        # Two people equally close, one of whom has gone to the trouble of
+        # saying it is wrong. A correction that loses a tie can never be
+        # made at all.
+        sid = self.queue(
+            S.ADD_CHILD,
+            [S.person(S.CHILD, "Said", sex="M")],
+            S.subject(person_id=self.grandmother, label="Martha"),
+        )
+        db.upsert_contributor(self.conn, 8001, linked_person_id=self.parent)
+        db.resolve_submission(
+            self.conn, sid, "approved", reviewed_by=1,
+            resulting_person_id=self.grandmother,
+        )
+        weight = db.correction_weight(self.conn, self.grandmother, self.parent)
+        self.assertEqual(weight["mine"], weight["theirs"])
+        self.assertTrue(weight["outranks"])
+
+    def test_being_further_away_does_not_outrank(self):
+        far = db.create_person(
+            self.conn, "Rita", sex="F", father_id=self.outsider
+        )
+        weight = db.correction_weight(self.conn, self.grandmother, far)
+        self.assertFalse(weight["outranks"])
+
+
+class ACorrectionWaitsForSomebodyCloserTests(ReviewTestCase):
+    """When the word on record came from nearer the person, ask them.
+
+    Green flows and yellow talks. A correction from further away than
+    whoever named them does not lose — it waits, and the closer relative is
+    asked to agree. That is the difference between weighting an opinion and
+    overruling one.
+    """
+
+    def setUp(self):
+        super().setUp()
+        import asyncio
+
+        from bot import store
+
+        self.asyncio = asyncio
+        self.store = store
+        self.her = db.create_person(
+            self.conn, "Martha", family_name="Allam", sex="F"
+        )
+        self.daughter = db.create_person(
+            self.conn, "Nada", sex="F", mother_id=self.her
+        )
+        self.stranger = db.create_person(self.conn, "Elias", sex="M")
+
+        # The daughter is who put the name there.
+        naming = self.queue(
+            S.ADD_PARENTS,
+            [S.person(S.MOTHER, "Martha", sex="F")],
+            S.subject(person_id=self.daughter, label="Nada"),
+            user=8100,
+        )
+        db.upsert_contributor(self.conn, 8100, linked_person_id=self.daughter)
+        db.resolve_submission(
+            self.conn, naming, "approved", reviewed_by=1,
+            resulting_person_id=self.her,
+        )
+        self.conn.commit()
+
+    def name_fix_from(self, user, person_id, now):
+        db.upsert_contributor(self.conn, user, linked_person_id=person_id)
+        payload = S.build(
+            S.NAME_FIX,
+            submitted_by=S.submitter(user, person_id=person_id),
+            about=S.subject(person_id=self.her, label="Martha"),
+            target_person_id=self.her,
+            field="family_name",
+            was="Allam",
+            now=now,
+        )
+        sid = db.add_submission(self.conn, user, payload)
+        self.conn.commit()
+        return sid, self.asyncio.run(self.store.auto_review(user, sid))
+
+    def test_a_correction_from_further_away_waits(self):
+        _sid, verdict = self.name_fix_from(8200, self.stranger, "Alam")
+        self.assertEqual(verdict["tier"], "yellow")
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["family_name"], "Allam"
+        )
+
+    def test_the_person_who_named_her_is_the_one_asked(self):
+        _sid, verdict = self.name_fix_from(8200, self.stranger, "Alam")
+        self.assertIsNotNone(verdict["outreach"])
+        self.assertEqual(verdict["outreach"]["chat_id"], 8100)
+
+    def test_a_correction_from_the_daughter_herself_lands(self):
+        _sid, verdict = self.name_fix_from(8100, self.daughter, "Alam")
+        self.assertEqual(verdict["tier"], "green")
+        self.assertEqual(
+            db.get_person(self.conn, self.her)["family_name"], "Alam"
+        )

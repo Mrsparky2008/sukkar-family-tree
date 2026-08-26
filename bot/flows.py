@@ -231,6 +231,30 @@ def _build_correction(
     )
 
 
+def _build_name_fix(
+    answers,
+    submitted_by,
+    about,
+    *,
+    target_person_id=None,
+    target_label=None,
+    **_,
+):
+    field = answers["field"]
+    return submissions.build(
+        submissions.NAME_FIX,
+        submitted_by=submitted_by,
+        about=submissions.subject(
+            person_id=target_person_id,
+            label=target_label or about.get("label"),
+        ),
+        target_person_id=target_person_id,
+        field=field,
+        was=(answers.get(NAMES_KEY) or {}).get(field),
+        now=answers["now"],
+    )
+
+
 # ---------------------------------------------------------------------------
 # The flows
 # ---------------------------------------------------------------------------
@@ -517,6 +541,39 @@ CORRECTION = Flow(
 )
 
 
+#: Answers key the handlers inject with the three names currently on record,
+#: so the question can show what it says now and the payload can record what
+#: it said when the correction was written.
+NAMES_KEY = "_names"
+
+
+def _name_now_prompt(answers):
+    field = answers.get("field")
+    return texts.name_fix_ask(
+        submissions.NAME_FIELDS.get(field, "name"),
+        (answers.get(NAMES_KEY) or {}).get(field),
+    )
+
+
+NAME_FIX = Flow(
+    kind=submissions.NAME_FIX,
+    steps=[
+        Step(
+            "field",
+            CHOICE,
+            lambda a: texts.name_fix_pick(a.get(SUBJECT_KEY) or "them"),
+            choices=[
+                (texts.NAME_FIX_GIVEN, "given_name"),
+                (texts.NAME_FIX_FAMILY, "family_name"),
+                (texts.NAME_FIX_ALIAS, "also_known_as"),
+            ],
+        ),
+        Step("now", NAME, _name_now_prompt),
+    ],
+    build=_build_name_fix,
+)
+
+
 #: Menu key -> flow, in the order the spec lists them. The visible label comes
 #: from texts.menu_labels() so it can name whoever the cursor is on.
 MENU: list[tuple[str, Flow]] = [
@@ -544,5 +601,6 @@ def default_role(kind: str, step_id: str) -> str | None:
 
 BY_KIND: dict[str, Flow] = {
     flow.kind: flow
-    for flow in (IDENTIFY, ADD_PARENTS, ADD_SIBLING, ADD_SPOUSE, ADD_CHILD, CORRECTION)
+    for flow in (IDENTIFY, ADD_PARENTS, ADD_SIBLING, ADD_SPOUSE, ADD_CHILD,
+                 CORRECTION, NAME_FIX)
 }

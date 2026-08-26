@@ -247,6 +247,9 @@ def approve(
             "yourself, then reject it with a note saying what you did."
         )
 
+    if kind == submissions.NAME_FIX:
+        return _apply_name_fix(conn, submission_id, payload, reviewed_by)
+
     # A near-certain match means this is probably a duplicate. Approving would
     # create a second Youssef and quietly move his son onto the copy. Refuse
     # and make the reviewer say which they meant.
@@ -407,6 +410,73 @@ def approve(
         db.assign_branches(conn)
 
     return created
+
+
+def _apply_name_fix(
+    conn: sqlite3.Connection,
+    submission_id: int,
+    payload: dict[str, Any],
+    reviewed_by: int,
+) -> list[int]:
+    """Change how somebody is written. Never who they are attached to.
+
+    A name fix is the one submission that edits an existing person rather
+    than adding one, so it is deliberately the narrowest thing in the
+    system: one of three name columns, on one person, and nothing else. The
+    display name is computed from the links, so correcting a family name
+    here re-spells every descendant who inherited it without touching a
+    single row of theirs.
+    """
+    person_id = payload.get("target_person_id")
+    field = payload.get("field")
+    if field not in submissions.NAME_FIELDS:
+        raise Blocked(f"not a name that can be fixed: {field!r}")
+    person = db.get_person(conn, int(person_id)) if person_id else None
+    if person is None:
+        raise Blocked(f"there is no person #{person_id}")
+
+    current = person[field]
+    wanted = payload.get("now")
+    if current == wanted:
+        raise Blocked(f"#{person_id} already says {wanted!r}")
+
+    # Somebody may have corrected the same name in between. Applying anyway
+    # would silently undo their word, so say so and let a human choose.
+    stated_was = payload.get("was")
+    if stated_was is not None and current is not None and current != stated_was:
+        raise Blocked(
+            f"#{person_id} now says {current!r}, not {stated_was!r} —"
+            " somebody changed it after this was sent"
+        )
+
+    if field == "family_name":
+        # Family names carry a claim history: who spelled it which way, and
+        # whether it was their own answer about themselves. Somebody fixing
+        # their own is answering about themselves; anyone else is not, and
+        # a guess never overwrites what a person said about their own name.
+        teller = (payload.get("submitted_by") or {}).get("person_id")
+        theirs = teller is not None and int(teller) == int(person_id)
+        if not db.set_family_name(
+            conn, int(person_id), wanted, self_reported=theirs
+        ):
+            raise Blocked(
+                f"#{person_id} spelled their own family name {current!r}."
+                " Their own answer stands over anyone else's correction."
+            )
+    else:
+        db.update_person(conn, int(person_id), **{field: wanted})
+
+    db.resolve_submission(
+        conn,
+        submission_id,
+        "approved",
+        reviewed_by,
+        resulting_person_id=int(person_id),
+        review_note=f"{submissions.NAME_FIELDS[field]}: {current or '(blank)'}"
+        f" -> {wanted}",
+    )
+    conn.commit()
+    return []
 
 
 def merge(conn, submission_id: int, person_id: int, reviewed_by: int) -> list[int]:

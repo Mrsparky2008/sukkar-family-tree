@@ -666,6 +666,17 @@ async def _father_of_about(
 def _echo_sentence(payload: dict[str, Any], who: dict[str, Any]) -> str:
     """"Sarkis is your brother, and his father is Kalim." — the read-back."""
     about = payload.get("about") or {}
+
+    if payload.get("kind") == submissions.NAME_FIX:
+        # A name fix names nobody new, so the relationship read-back has
+        # nothing to say. What matters here is the before and the after.
+        return texts.name_fix_confirm(
+            about.get("label") or "them",
+            submissions.NAME_FIELDS.get(payload.get("field"), "name"),
+            payload.get("was"),
+            payload.get("now"),
+        )
+
     owner = (
         "your"
         if _is_self(about, who)
@@ -2698,7 +2709,13 @@ async def _triage(update, context, user_id: int, submission_id: int) -> None:
     """Green flows, yellow talks: run the system reviewer on what was just
     queued, and carry any outreach question to the person it belongs to."""
     verdict = await store.auto_review(user_id, submission_id)
-    slate = context.user_data.setdefault("triage", {"green": [], "yellow": 0})
+    slate = context.user_data.setdefault(
+        "triage", {"green": [], "yellow": 0, "messages": []}
+    )
+    # Some verdicts say it better than the generic line can — a corrected
+    # name did not go "onto the tree", it changed one already there.
+    if verdict.get("message"):
+        slate.setdefault("messages", []).append(verdict["message"])
     if verdict.get("tier") == "green":
         slate["green"] += verdict.get("created") or []
     elif verdict.get("tier") == "yellow":
@@ -2731,6 +2748,8 @@ async def _announce_triage(update, context) -> None:
     slate = context.user_data.pop("triage", None)
     if not slate:
         return
+    for message in slate.get("messages") or []:
+        await _say(update, message)
     green = slate["green"]
     if green:
         names = [texts.tagged(g["label"], g["person_id"]) for g in green]
@@ -2744,7 +2763,11 @@ async def _announce_triage(update, context) -> None:
                 ),
             )
         _refresh_published_chart()
-    if slate["yellow"]:
+    elif slate.get("messages"):
+        # A correction that landed changes the chart just as much as an
+        # addition does.
+        _refresh_published_chart()
+    if slate["yellow"] and not slate.get("messages"):
         await _say(update, texts.QUEUED_FOR_CHECK)
 
 
@@ -2965,7 +2988,10 @@ async def _start_correction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Anything on the tree can be corrected, not just what this contributor
     # sent — a niece spots her grandfather's wrong marriage even though an
     # uncle entered it.
-    rows = [[_button(texts.FIX_TREE, f"{CB_FIX}:tree")]]
+    rows = [
+        [_button(texts.NAME_FIX_MENU, f"{CB_FIX}:names")],
+        [_button(texts.FIX_TREE, f"{CB_FIX}:tree")],
+    ]
     if not mine:
         rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
         await _say(update, texts.FIX_PICK, _kb(rows))
@@ -2979,6 +3005,50 @@ async def _start_correction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await _say(update, texts.FIX_PICK, _kb(rows))
     return PICK_SUBMISSION
+
+
+async def _pick_name_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Whose name. Their own circle as buttons, anyone else by number.
+
+    A relative who spots a wrong spelling is almost always looking at
+    somebody close to them, so those are one tap. The number is the way in
+    for everyone else, and it is the only unambiguous way to name a person
+    in a family where a dozen men answer to the same word.
+    """
+    rows = []
+    for item in await store.subject_candidates(update.effective_user.id):
+        if not item.get("person_id"):
+            continue
+        label = item["label"]
+        if item.get("note"):
+            label = f"{label} — {item['note']}"
+        rows.append(
+            [_button(_trim(label), f"{CB_FIX}:name:{item['person_id']}")]
+        )
+        if len(rows) >= 8:
+            break
+    rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
+    await _say(update, texts.NAME_FIX_NOBODY, _kb(rows))
+    return PICK_SUBMISSION
+
+
+async def _start_name_fix(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, person_id: int
+):
+    target = await store.name_fix_target(update.effective_user.id, person_id)
+    if target is None:
+        return await _show_menu(update, context, texts.ERROR)
+
+    _begin(
+        context,
+        flows.NAME_FIX,
+        target_person_id=person_id,
+        target_label=target["label"],
+    )
+    answers = _state(context)["answers"]
+    answers[flows.SUBJECT_KEY] = texts.tagged(target["label"], person_id)
+    answers[flows.NAMES_KEY] = target["names"]
+    return await _ask(update, context)
 
 
 def _trim(label: str, limit: int = 60) -> str:
@@ -2998,6 +3068,12 @@ async def on_pick_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         _begin(context, flows.CORRECTION)
         _state(context)["answers"]["_tree_fix"] = True
         return await _ask(update, context)
+
+    if parts[1] == "names":
+        return await _pick_name_target(update, context)
+
+    if parts[1] == "name":
+        return await _start_name_fix(update, context, int(parts[2]))
 
     fixing = parts[1] == "go"
     submission_id = int(parts[-1])

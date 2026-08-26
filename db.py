@@ -1485,6 +1485,89 @@ def closeness(distance: int | None) -> str:
     return _CLOSENESS.get(distance, f"{distance} steps away")
 
 
+def standing_name_author(
+    conn: sqlite3.Connection, person_id: int
+) -> tuple[int | None, int | None]:
+    """Who put the name that is on record there, and who they are.
+
+    Returns (telegram_user_id, their person id) — either may be None. The
+    first submission that produced this person is the one that named them;
+    later claims about the same person did not.
+    """
+    origin = conn.execute(
+        "SELECT from_submission_id FROM people WHERE id = ?", (person_id,)
+    ).fetchone()
+    row = None
+    if origin and origin["from_submission_id"]:
+        row = get_submission(conn, int(origin["from_submission_id"]))
+    if row is None:
+        row = conn.execute(
+            "SELECT * FROM submissions WHERE resulting_person_id = ?"
+            " ORDER BY id LIMIT 1",
+            (person_id,),
+        ).fetchone()
+    if row is None:
+        return (None, None)
+    teller = (submission_payload(row).get("submitted_by") or {})
+    who = teller.get("person_id")
+    if not who:
+        # Older payloads did not carry it, and a contributor who signed in
+        # after sending still has a link. Falling back keeps them weighable
+        # instead of counting as nobody, which would let anyone overrule them.
+        contributor = get_contributor(conn, int(row["telegram_user_id"]))
+        who = contributor["linked_person_id"] if contributor else None
+    return (row["telegram_user_id"], who)
+
+
+def correction_weight(
+    conn: sqlite3.Connection, person_id: int, corrector_person_id: int | None
+) -> dict[str, Any]:
+    """Whether a correction outranks the word already on record.
+
+    Nobody here has a credential. What they have is a position: a daughter
+    knows her own mother's maiden name, and a second cousin is repeating
+    something he heard. So closeness on the tree stands in for authority —
+    the same measure the provenance screen already reports, used to decide
+    rather than only to display.
+
+    Ties go to the correction. Somebody equally close who has gone to the
+    trouble of saying it is wrong is the better of two equal claims, and a
+    correction that loses a tie can never be made at all.
+
+    Distance is measured through parents, children and marriages, so a wife's
+    own family reaches her by marriage even when her maiden line is not
+    recorded. `None` means unconnected, and never outranks anybody.
+    """
+    author_user, author_person = standing_name_author(conn, person_id)
+    mine = (
+        relationship_distance(conn, corrector_person_id, person_id)
+        if corrector_person_id
+        else None
+    )
+    theirs = (
+        relationship_distance(conn, author_person, person_id)
+        if author_person
+        else None
+    )
+
+    if mine is None:
+        outranks = False
+    elif theirs is None:
+        outranks = True
+    else:
+        outranks = mine <= theirs
+
+    return {
+        "mine": mine,
+        "theirs": theirs,
+        "author_user_id": author_user,
+        "author_person_id": author_person,
+        "outranks": outranks,
+        "how_close": closeness(mine),
+        "theirs_how_close": closeness(theirs),
+    }
+
+
 def _teller_label(
     conn: sqlite3.Connection, teller: dict[str, Any], teller_id: int | None, row
 ) -> str:

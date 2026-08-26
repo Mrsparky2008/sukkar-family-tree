@@ -30,10 +30,22 @@ ADD_SIBLING = "add_sibling"
 ADD_SPOUSE = "add_spouse"
 ADD_CHILD = "add_child"
 CORRECTION = "correction"
+NAME_FIX = "name_fix"
 
 KINDS = frozenset(
-    {IDENTIFY, ADD_PARENTS, ADD_SIBLING, ADD_SPOUSE, ADD_CHILD, CORRECTION}
+    {IDENTIFY, ADD_PARENTS, ADD_SIBLING, ADD_SPOUSE, ADD_CHILD, CORRECTION,
+     NAME_FIX}
 )
+
+#: The three name fields anyone may correct. Deliberately only names: a
+#: correction can change how somebody is written, never who they are attached
+#: to. Moving a person between parents is a decision with consequences for
+#: everyone below them, and it stays with the review desk.
+NAME_FIELDS: dict[str, str] = {
+    "given_name": "first name",
+    "family_name": "family name",
+    "also_known_as": "the name they go by",
+}
 
 # --- roles: how a named person relates to the subject -----------------------
 
@@ -55,6 +67,7 @@ ROLES_BY_KIND: dict[str, frozenset[str]] = {
     ADD_SPOUSE: frozenset({SPOUSE}),
     ADD_CHILD: frozenset({CHILD}),
     CORRECTION: frozenset(),
+    NAME_FIX: frozenset(),
 }
 
 #: Field names that must never appear on a person in a payload. Constraint 2 is
@@ -170,6 +183,9 @@ def build(
     source: str | None = None,
     target_submission_id: int | None = None,
     target_person_id: int | None = None,
+    field: str | None = None,
+    was: str | None = None,
+    now: str | None = None,
 ) -> dict[str, Any]:
     """Assemble a payload. Raises ValueError if it would be invalid.
 
@@ -191,6 +207,14 @@ def build(
     if kind == CORRECTION:
         payload["target_submission_id"] = target_submission_id
         payload["target_person_id"] = target_person_id
+    if kind == NAME_FIX:
+        payload["target_person_id"] = target_person_id
+        payload["field"] = field
+        # What it said when the correction was written. Kept so a fix that
+        # has been overtaken by another can be spotted rather than silently
+        # undoing somebody else's later word.
+        payload["was"] = (was or "").strip() or None
+        payload["now"] = (now or "").strip() or None
 
     problems = validate(payload)
     if problems:
@@ -230,6 +254,15 @@ def validate(payload: dict[str, Any]) -> list[str]:
             "target_person_id"
         ):
             problems.append("a correction must name what it is correcting")
+    elif kind == NAME_FIX:
+        if not payload.get("target_person_id"):
+            problems.append("a name fix must say whose name it is")
+        if payload.get("field") not in NAME_FIELDS:
+            problems.append(f"not a name that can be fixed: {payload.get('field')!r}")
+        if not payload.get("now"):
+            problems.append("a name fix must say what it should say")
+        elif payload.get("now") == payload.get("was"):
+            problems.append("that is what it already says")
     elif not entries:
         problems.append(f"{kind} needs at least one person")
 
@@ -305,6 +338,7 @@ _KIND_TITLES = {
     ADD_SPOUSE: "Spouse",
     ADD_CHILD: "Child",
     CORRECTION: "Correction",
+    NAME_FIX: "Name fix",
 }
 
 
@@ -344,6 +378,11 @@ def describe(payload: dict[str, Any]) -> str:
 
     if kind == CORRECTION:
         return f"Correction to {who}: {payload.get('note') or '(no detail)'}"
+
+    if kind == NAME_FIX:
+        what = NAME_FIELDS.get(payload.get("field"), "name")
+        was = payload.get("was") or "(blank)"
+        return f"{who} — {what}: {was} -> {payload.get('now')}"
 
     if kind == IDENTIFY:
         entries = payload.get("people") or []

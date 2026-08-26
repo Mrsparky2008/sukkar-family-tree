@@ -145,6 +145,36 @@ async def identity_candidates(
     return await _run(_identity_candidates, given_name, father_given_name, house)
 
 
+def _name_fix_target(
+    conn: sqlite3.Connection, telegram_user_id: int, person_id: int
+) -> dict[str, Any] | None:
+    """The three names on record for somebody, and how close the asker is.
+
+    Returned before a single question is asked so the flow can show what it
+    says now — a correction offered against a blank is usually somebody
+    fixing the wrong person.
+    """
+    person = db.get_person(conn, person_id)
+    if person is None:
+        return None
+    contributor = db.get_contributor(conn, telegram_user_id)
+    me = contributor["linked_person_id"] if contributor else None
+    weight = db.correction_weight(conn, person_id, me)
+    return {
+        "person_id": person_id,
+        "label": db.row_display_name(person),
+        "names": {field: person[field] for field in submissions.NAME_FIELDS},
+        "how_close": weight["how_close"],
+        "outranks": weight["outranks"],
+    }
+
+
+async def name_fix_target(
+    telegram_user_id: int, person_id: int
+) -> dict[str, Any] | None:
+    return await _run(_name_fix_target, telegram_user_id, person_id)
+
+
 def _link_contributor(
     conn: sqlite3.Connection, telegram_user_id: int, person_id: int
 ) -> dict[str, Any]:
@@ -433,6 +463,77 @@ def _standing_author(conn: sqlite3.Connection, person_id: int) -> int | None:
     return origin["telegram_user_id"] if origin else None
 
 
+def _review_name_fix(
+    conn: sqlite3.Connection,
+    contributor: sqlite3.Row | None,
+    me: int | None,
+    submission_id: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Weigh a name correction by how close the corrector is to the person.
+
+    Nobody here has a credential, only a position. A granddaughter correcting
+    her grandmother's maiden name is nearer to that fact than whoever typed
+    it in from memory, and the tree already knows how near. So closeness
+    decides: outrank the standing word and the fix goes straight on; be
+    further away than whoever said it and the fix waits while the closer
+    person is asked.
+
+    Nothing here writes to `people` directly — it goes through the same
+    approve() the review desk uses, so a correction leaves the same trail as
+    everything else.
+    """
+    import review
+
+    person_id = payload.get("target_person_id")
+    if not me or not person_id:
+        return {"tier": "manual"}
+
+    weight = db.correction_weight(conn, int(person_id), me)
+
+    if not weight["outranks"]:
+        author = weight["author_user_id"]
+        outreach = None
+        if author and author != (contributor["telegram_user_id"] if contributor else None):
+            person = db.get_person(conn, int(person_id))
+            question = texts.peer_check_question(
+                asker=(contributor["display_label"] if contributor else None)
+                or "A relative",
+                claim=submissions.describe(payload),
+                standing=texts.tagged(
+                    db.row_display_name(person), int(person_id)
+                ),
+            )
+            check_id = db.add_peer_check(conn, submission_id, author, question)
+            outreach = {
+                "chat_id": author,
+                "check_id": check_id,
+                "question": question,
+            }
+        why = texts.name_fix_outranked(
+            weight["how_close"], weight["theirs_how_close"]
+        )
+        return {
+            "tier": "yellow",
+            "why": why,
+            "message": why,
+            "outreach": outreach,
+        }
+
+    try:
+        review.approve(conn, submission_id, SYSTEM_REVIEWER)
+    except review.Blocked as blocked:
+        return {"tier": "yellow", "why": str(blocked), "outreach": None}
+
+    person = db.get_person(conn, int(person_id))
+    label = db.row_display_name(person)
+    return {
+        "tier": "green",
+        "created": [],
+        "message": texts.name_fix_done(texts.tagged(label, int(person_id))),
+    }
+
+
 def _auto_review(
     conn: sqlite3.Connection, telegram_user_id: int, submission_id: int
 ) -> dict[str, Any]:
@@ -450,6 +551,9 @@ def _auto_review(
     # First-hand means: an admitted contributor (a person approved their
     # sign-up) speaking about their own immediate circle, from their own
     # account. Anything else is the ordinary queue.
+    if kind == submissions.NAME_FIX:
+        return _review_name_fix(conn, contributor, me, submission_id, payload)
+
     if kind not in _FIRST_HAND_KINDS or not me or about.get("person_id") != me:
         return {"tier": "manual"}
 
