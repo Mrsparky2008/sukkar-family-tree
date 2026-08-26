@@ -2307,3 +2307,98 @@ class TheWordsHaveToLandTests(BotTestCase):
         # It used to repeat the change as "Got it — ..." and then suggest
         # who to add next, neither of which follows from renaming somebody.
         self.assertNotIn(texts.ADDED.split("{")[0], after)
+
+
+class ASpellingRunsDownTheLineTests(BotTestCase):
+    """Correcting a father leaves everyone below him wearing the old one.
+
+    A family name is stored on each person rather than derived from the
+    father, and deliberately: this family really does spell it several ways,
+    and one man's paperwork does not overrule his brother's. But when a
+    spelling was simply wrong, the people who inherited it are still wearing
+    the mistake — so it is offered, one tap, never applied on its own.
+    """
+
+    def setUp(self):
+        super().setUp()
+        conn = db.connect()
+        self.father = self.ids["khalil_y"]
+        # A son who has never answered for his own name, and his son.
+        self.son = db.create_person(
+            conn, "Toufic", family_name="Sukkar", sex="M", father_id=self.father
+        )
+        self.grandson = db.create_person(
+            conn, "Emmanuel", family_name="Sukkar", sex="M", father_id=self.son
+        )
+        # A son who did answer for himself, and his son after him.
+        self.spoken = db.create_person(
+            conn, "Georgios", family_name="Succar", sex="M", father_id=self.father
+        )
+        db.set_family_name(conn, self.spoken, "Succar", self_reported=True)
+        self.spokens_son = db.create_person(
+            conn, "Elie", family_name="Succar", sex="M", father_id=self.spoken
+        )
+        conn.commit()
+        conn.close()
+
+    async def fix_the_father(self, answer=None):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.say(str(self.father))
+        await chat.tap(texts.NAME_FIX_FAMILY)
+        await chat.say("Sukar")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        if answer:
+            await chat.tap(answer)
+        return chat
+
+    async def test_it_offers_rather_than_helping_itself(self):
+        chat = await self.fix_the_father()
+        self.assertIn(texts.NAME_FIX_ALSO_YES, chat.buttons)
+        # Nothing below him has moved until the tap.
+        self.assertEqual(self.person(self.son)["family_name"], "Sukkar")
+
+    async def test_the_offer_names_who_it_means(self):
+        chat = await self.fix_the_father()
+        self.assertIn("Toufic", chat.text)
+        self.assertIn("Emmanuel", chat.text)
+
+    async def test_saying_yes_spells_the_line(self):
+        await self.fix_the_father(texts.NAME_FIX_ALSO_YES)
+        self.assertEqual(self.person(self.son)["family_name"], "Sukar")
+        self.assertEqual(self.person(self.grandson)["family_name"], "Sukar")
+
+    async def test_saying_no_leaves_them_alone(self):
+        await self.fix_the_father(texts.NAME_FIX_ALSO_NO)
+        self.assertEqual(self.person(self.son)["family_name"], "Sukkar")
+        self.assertEqual(self.person(self.grandson)["family_name"], "Sukkar")
+
+    async def test_somebody_who_answered_for_themselves_is_left_out(self):
+        chat = await self.fix_the_father()
+        self.assertNotIn("Georgios", chat.text)
+        await chat.tap(texts.NAME_FIX_ALSO_YES)
+        self.assertEqual(self.person(self.spoken)["family_name"], "Succar")
+
+    async def test_their_children_follow_them_not_their_grandfather(self):
+        # Georgios said Succar. His son takes that, not the spelling being
+        # corrected two generations up.
+        chat = await self.fix_the_father()
+        self.assertNotIn("Elie", chat.text)
+        await chat.tap(texts.NAME_FIX_ALSO_YES)
+        self.assertEqual(self.person(self.spokens_son)["family_name"], "Succar")
+
+    async def test_every_changed_name_still_has_a_submission_behind_it(self):
+        before = len(self.queued())
+        await self.fix_the_father(texts.NAME_FIX_ALSO_YES)
+        after = self.queued()[before:]
+        # The father, and one each for everybody who followed him.
+        self.assertGreaterEqual(len(after), 3)
+        for row in after:
+            self.assertEqual(row["payload"]["kind"], submissions.NAME_FIX)
+            self.assertEqual(row["status"], "approved")
+        touched = {row["payload"]["target_person_id"] for row in after}
+        self.assertLessEqual({self.father, self.son, self.grandson}, touched)
+        # Never the ones who answered for themselves.
+        self.assertNotIn(self.spoken, touched)
+        self.assertNotIn(self.spokens_son, touched)

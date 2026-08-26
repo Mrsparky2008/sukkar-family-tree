@@ -83,6 +83,7 @@ CB_KEEP = "keep"
 CB_REDO = "redo"
 CB_NEXT = "next"
 CB_COUNT = "cnt"
+CB_SPELL = "spell"
 
 
 # ===========================================================================
@@ -770,6 +771,10 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
         # The triage line already said what changed, in better words than
         # "Got it —" plus the raw summary. Repeating it and then suggesting
         # who to add next is two non-sequiturs in a row.
+        if context.user_data.get("spell_the_line"):
+            # A question is on screen waiting to be answered. Putting a menu
+            # under it buries it and offers a way past it in the same breath.
+            return
         return await _show_menu(update, context)
 
     added = texts.ADDED.format(summary=submissions.describe(payload))
@@ -2723,6 +2728,8 @@ async def _triage(update, context, user_id: int, submission_id: int) -> None:
     # name did not go "onto the tree", it changed one already there.
     if verdict.get("message"):
         slate.setdefault("messages", []).append(verdict["message"])
+    if verdict.get("also"):
+        slate["also"] = verdict["also"]
     if verdict.get("tier") == "green":
         slate["green"] += verdict.get("created") or []
     elif verdict.get("tier") == "yellow":
@@ -2776,6 +2783,48 @@ async def _announce_triage(update, context) -> None:
         _refresh_published_chart()
     if slate["yellow"] and not slate.get("messages"):
         await _say(update, texts.QUEUED_FOR_CHECK)
+
+    also = slate.get("also")
+    if also:
+        context.user_data["spell_the_line"] = also
+        names = "\n".join(
+            f"    {texts.tagged(p['label'], p['person_id'])}"
+            for p in also["people"]
+        )
+        await _say(
+            update,
+            texts.name_fix_also_ask(also["now"], names, len(also["people"])),
+            _kb(
+                [
+                    [_button(texts.NAME_FIX_ALSO_YES, f"{CB_SPELL}:yes")],
+                    [_button(texts.NAME_FIX_ALSO_NO, f"{CB_SPELL}:no")],
+                ]
+            ),
+        )
+
+
+async def on_spell_the_line(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yes or no to spelling the rest of the line the same way."""
+    query = update.callback_query
+    await query.answer()
+    also = context.user_data.pop("spell_the_line", None)
+    if not also or query.data.endswith(":no"):
+        return await _show_menu(update, context)
+
+    changed = await store.spell_the_line(
+        update.effective_user.id,
+        [p["person_id"] for p in also["people"]],
+        also["was"],
+        also["now"],
+    )
+    if not changed:
+        return await _show_menu(update, context)
+    names = "\n".join(
+        f"    {texts.tagged(p['label'], p['person_id'])}" for p in changed
+    )
+    await _say(update, texts.name_fix_also_done(names))
+    _refresh_published_chart()
+    return await _show_menu(update, context)
 
 
 async def on_peer_check(update: Update, context: ContextTypes.DEFAULT_TYPE):

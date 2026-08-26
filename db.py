@@ -1519,6 +1519,49 @@ def standing_name_author(
     return (row["telegram_user_id"], who)
 
 
+def inherited_spelling(
+    conn: sqlite3.Connection, person_id: int, old_spelling: str
+) -> list[sqlite3.Row]:
+    """Descendants down the father chain still carrying the old spelling.
+
+    A family name is stored on each person, not derived from the father, and
+    deliberately so: this family really does spell it several ways, and one
+    man's passport does not overrule his brother's. But when a spelling was
+    wrong rather than different, everyone who inherited the mistake is still
+    wearing it.
+
+    So this finds them and stops there. Anyone who answered for their own
+    name is left out — their own word is not a mistake to be swept up — and
+    so is anyone already spelling it some third way, because that is a
+    separate claim, not this one.
+    """
+    if not old_spelling:
+        return []
+    found: list[sqlite3.Row] = []
+    frontier = [person_id]
+    seen = {person_id}
+    while frontier:
+        following: list[int] = []
+        for parent in frontier:
+            for child in conn.execute(
+                PERSON_SELECT + " WHERE p.father_id = ?", (parent,)
+            ):
+                if child["id"] in seen:
+                    continue
+                seen.add(child["id"])
+                following.append(child["id"])
+                if child["family_name_self_reported"]:
+                    # Their own word, and their children follow them rather
+                    # than their grandfather — so the sweep stops here, not
+                    # just skips them.
+                    following.pop()
+                    continue
+                if (child["family_name"] or "") == old_spelling:
+                    found.append(child)
+        frontier = following
+    return found
+
+
 def correction_weight(
     conn: sqlite3.Connection, person_id: int, corrector_person_id: int | None
 ) -> dict[str, Any]:

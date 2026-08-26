@@ -711,6 +711,31 @@ def name_fix_done(who: str) -> str:
     )
 
 
+def name_fix_also_ask(now: str, names: str, count: int) -> str:
+    """Offer the same spelling to everyone who inherited the old one.
+
+    Not automatic. This family genuinely spells its name several ways, and
+    one man's paperwork does not overrule his brother's — but when the
+    spelling was wrong rather than different, everyone below him is still
+    wearing the mistake.
+    """
+    who = "one other person" if count == 1 else f"{count} other people"
+    return (
+        f"{who} below them still spell it the old way — nobody has said so "
+        f"themselves, they just took it from the entry you've just fixed:\n\n"
+        f"{names}\n\n"
+        f"Spell them {now} too?"
+    )
+
+
+def name_fix_also_done(names: str) -> str:
+    return f"Done:\n\n{names}"
+
+
+NAME_FIX_ALSO_YES = "Yes — change them too"
+NAME_FIX_ALSO_NO = "No — leave them as they are"
+
+
 def name_fix_outranked(mine: str, theirs: str) -> str:
     return (
         "Thanks. Someone closer to them put that name there, so I've asked "

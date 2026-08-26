@@ -9,6 +9,7 @@ CallbackQuery, and reply_text.
 
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -62,6 +63,15 @@ class Conversation:
         self.state: int | None = None
         self.context = SimpleNamespace(user_data={}, chat_data={}, error=None)
         self._conversation_handler = build_conversation()
+        # Buttons the real application registers alongside the conversation,
+        # so a test can reach them the way a phone would.
+        # Matched on the pattern directly: PTB's own check_update wants a real
+        # Update, and judging a fake one lets the first handler in the list
+        # swallow everything.
+        self._outside_handlers = [
+            (re.compile(r"^peer:"), handlers.on_peer_check),
+            (re.compile(r"^spell:"), handlers.on_spell_the_line),
+        ]
 
     # --- inspecting what came back ---------------------------------------
 
@@ -134,6 +144,15 @@ class Conversation:
             if data is None and isinstance(handler, MessageHandler):
                 self.state = await handler.callback(update, self.context)
                 return self.state
+
+        # Some buttons ride outside the conversation entirely — a peer check,
+        # or an offer that follows a correction — because by the time they are
+        # answered the person may have tapped off somewhere else. Real PTB
+        # reaches them through the application's own handlers, so the harness
+        # has to as well, or they are untestable.
+        for pattern, callback in self._outside_handlers:
+            if data is not None and pattern.match(data):
+                return await callback(update, self.context)
 
         raise AssertionError(
             f"nothing in state {self.state} handles "

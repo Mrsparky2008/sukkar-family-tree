@@ -527,11 +527,34 @@ def _review_name_fix(
 
     person = db.get_person(conn, int(person_id))
     label = db.row_display_name(person)
-    return {
+    verdict = {
         "tier": "green",
         "created": [],
         "message": texts.name_fix_done(texts.tagged(label, int(person_id))),
     }
+
+    # A family name lives on each person, so correcting the father leaves
+    # everyone who inherited the old spelling still wearing it. Offered, not
+    # applied: this family really does spell it several ways, and one man's
+    # papers do not overrule his brother's.
+    if payload.get("field") == "family_name":
+        inherited = db.inherited_spelling(
+            conn, int(person_id), payload.get("was") or ""
+        )
+        if inherited:
+            verdict["also"] = {
+                "field": "family_name",
+                "was": payload.get("was"),
+                "now": payload.get("now"),
+                "people": [
+                    {
+                        "person_id": row["id"],
+                        "label": db.row_display_name(row),
+                    }
+                    for row in inherited
+                ],
+            }
+    return verdict
 
 
 def _auto_review(
@@ -618,6 +641,62 @@ def _auto_review(
             "question": question,
         }
     return {"tier": "yellow", "why": why, "outreach": outreach}
+
+
+def _spell_the_line(
+    conn: sqlite3.Connection,
+    telegram_user_id: int,
+    person_ids: list[int],
+    was: str,
+    now: str,
+) -> list[dict[str, Any]]:
+    """Apply an accepted spelling to the people who inherited the old one.
+
+    Each one goes through the queue and the same approve() as anything else,
+    so every changed name still answers "who says so" with a submission.
+    """
+    import review
+
+    contributor = db.get_contributor(conn, telegram_user_id)
+    me = contributor["linked_person_id"] if contributor else None
+    changed: list[dict[str, Any]] = []
+    for person_id in person_ids:
+        person = db.get_person(conn, person_id)
+        if person is None or person["family_name"] != was:
+            continue
+        payload = submissions.build(
+            submissions.NAME_FIX,
+            submitted_by=submissions.submitter(
+                telegram_user_id,
+                person_id=me,
+                label=contributor["display_label"] if contributor else None,
+            ),
+            about=submissions.subject(
+                person_id=person_id, label=db.row_display_name(person)
+            ),
+            target_person_id=person_id,
+            field="family_name",
+            was=was,
+            now=now,
+        )
+        submission_id = db.add_submission(conn, telegram_user_id, payload)
+        try:
+            review.approve(conn, submission_id, SYSTEM_REVIEWER)
+        except review.Blocked:
+            continue
+        changed.append(
+            {
+                "person_id": person_id,
+                "label": db.row_display_name(db.get_person(conn, person_id)),
+            }
+        )
+    return changed
+
+
+async def spell_the_line(
+    telegram_user_id: int, person_ids: list[int], was: str, now: str
+) -> list[dict[str, Any]]:
+    return await _run(_spell_the_line, telegram_user_id, person_ids, was, now)
 
 
 async def auto_review(telegram_user_id: int, submission_id: int) -> dict[str, Any]:

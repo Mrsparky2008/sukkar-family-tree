@@ -192,6 +192,12 @@ def build_application(token: str | None = None) -> Application:
     application.add_handler(
         CallbackQueryHandler(handlers.on_peer_check, pattern=r"^peer:")
     )
+    # Same for "spell the rest of the line that way": the question follows a
+    # correction, and by the time it is answered the person may have tapped
+    # off somewhere else entirely.
+    application.add_handler(
+        CallbackQueryHandler(handlers.on_spell_the_line, pattern=r"^spell:")
+    )
     application.add_error_handler(handlers.on_error)
     return application
 

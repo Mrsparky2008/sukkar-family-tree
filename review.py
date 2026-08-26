@@ -193,6 +193,34 @@ def _fathers_name(conn: sqlite3.Connection, father: sqlite3.Row | None,
     return {**entry, "family_name": father["family_name"]}
 
 
+def _sons_name(
+    conn: sqlite3.Connection, subject_id: int, entry: dict[str, Any]
+) -> dict[str, Any]:
+    """A father with no spelling given takes the one his child carries.
+
+    "Add my parents" asks for a first name and stops — nobody types their
+    own father's surname, because it is obviously the same as theirs. It
+    usually is: father and child are the same patriline, so the child's
+    spelling is the best evidence available for his.
+
+    Only the father. A mother has her own maiden name, and assuming she
+    carries her child's is how a woman married in ends up filed under her
+    husband's family.
+
+    Only ever fills a blank, and only from a spelling this family actually
+    uses — a daughter whose husband married in from another family carries
+    his name, and her father does not.
+    """
+    if entry.get("family_name") or entry.get("role") != submissions.FATHER:
+        return entry
+    child = db.get_person(conn, subject_id)
+    if child is None or not child["family_name"]:
+        return entry
+    if db.canonical_family_name(child["family_name"], conn) != config.FAMILY_NAME:
+        return entry
+    return {**entry, "family_name": child["family_name"]}
+
+
 def _approval_note(edits, unknown_house: str | None) -> str | None:
     parts = []
     if edits:
@@ -303,7 +331,13 @@ def approve(
             main = submissions.primary_person(payload)
             father_id = mother_id = None
             for entry in entries:
-                person_id = place(entry, entry is main)
+                # Work out primacy before rewriting the entry: filling in a
+                # blank surname produces a new dict, and `is main` would then
+                # be false for the very person it is about.
+                is_primary = entry is main
+                person_id = place(
+                    _sons_name(conn, subject_id, entry), is_primary
+                )
                 if entry["role"] == submissions.FATHER:
                     father_id = person_id
                 else:
