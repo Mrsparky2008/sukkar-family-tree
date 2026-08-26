@@ -212,7 +212,7 @@ MENU_ADD_PARENTS = "Add my parents"
 MENU_ADD_SIBLING = "Add a sibling"
 MENU_ADD_SPOUSE = "Add a spouse"
 MENU_ADD_CHILD = "Add a child"
-MENU_FIX = "Fix something I submitted"
+MENU_FIX = "Fix something"
 MENU_VIEW = "See my corner of the tree"
 #: A plain link button at the end of every menu: the whole tree, one tap,
 #: straight into the browser. Only shown once the tree is published.
@@ -622,17 +622,33 @@ ASK_CHILD_GIVEN = "What's {his_her} first name?"
 
 # --- fix something ---------------------------------------------------------
 
-FIX_PICK = "Which one needs fixing?"
-
-FIX_ASK_NOTE = (
-    "What should it say instead?\n\n"
-    "Write it however you like — a person reads these."
+FIX_PICK = (
+    "What needs fixing?\n\n"
+    "A name that's spelled wrong you can change yourself, right now. "
+    "Anything else — a wrong parent, a marriage that shouldn't be there — "
+    "goes to one of the family's admins with a note from you."
 )
+
+def fix_ask_note(what: str | None = None) -> str:
+    """Say what is being corrected before asking for the correction.
+
+    "What should it say instead?" leaves "it" hanging on a phone, where the
+    thing being fixed has usually scrolled off the top.
+    """
+    heading = f"What's wrong with this?\n\n    {what}\n\n" if what else "What's wrong?\n\n"
+    return (
+        heading
+        + "Tell me in your own words — an admin reads it and sorts it out. "
+        "No particular wording needed."
+    )
+
+
+FIX_ASK_NOTE = fix_ask_note()
 
 #: Corrections about anyone on the tree, not just what this contributor
 #: sent. The numbers are what make it safe: half the family shares a
 #: handful of names, and #12 can only ever mean one man.
-FIX_TREE = "Something on the tree"
+FIX_TREE = "Something else — send a note"
 
 FIX_TREE_ASK = (
     "Tell me what's wrong, in your own words — a person reads these, and "
@@ -651,25 +667,22 @@ FIX_TREE_ASK = (
 # it and wait. A name is the one thing narrow enough to fix directly: three
 # columns, one person, no links touched.
 
-NAME_FIX_MENU = "✏️ Fix a name"
+NAME_FIX_MENU = "✏️ A name is spelled wrong"
 
 NAME_FIX_NOBODY = (
-    "Whose name needs fixing?\n\n"
-    "Tap somebody below, or send me their number from the tree — the one "
-    "shown beside their name, like 27."
+    "Whose name is it?\n\n"
+    "Tap them below, or send the number beside their name on the tree — "
+    "like 27."
 )
 
 NAME_FIX_NOT_A_NUMBER = (
-    "Send just the number beside their name on the tree — 27, say — or tap "
-    "one of the names above."
+    "I need the number beside their name on the tree — just the digits, "
+    "like 27 — or tap one of the names above."
 )
 
 
 def name_fix_pick(who: str) -> str:
-    return (
-        f"Which name is wrong for {who}?\n\n"
-        "Only the spelling changes — who they're related to stays as it is."
-    )
+    return f"Which name is wrong for {who}?"
 
 
 NAME_FIX_GIVEN = "First name"
@@ -692,16 +705,17 @@ def name_fix_confirm(who: str, what: str, was: str | None, now: str) -> str:
 
 def name_fix_done(who: str) -> str:
     return (
-        f"Done — {who}.\n\n"
-        "You're the closest person to them who's said anything about it, so "
-        "it's on the tree now. Anyone nearer can still correct it."
+        f"Done. It's {who} on the tree now.\n\n"
+        "You're close enough to them that I didn't need to check with "
+        "anybody. Someone closer can still change it."
     )
 
 
 def name_fix_outranked(mine: str, theirs: str) -> str:
     return (
-        f"The name on record came from {theirs}, and you're {mine}. "
-        "I've asked them — if they agree, your correction goes on."
+        "Thanks. Someone closer to them put that name there, so I've asked "
+        "them first — if they agree, your spelling goes on.\n\n"
+        f"(They're {theirs}; you're {mine}.)"
     )
 
 
@@ -843,11 +857,23 @@ PEER_THANKS = {
 FIX_THIS = "Something's wrong — fix it"
 FIX_BACK = "Back to the list"
 
+#: What happened to something somebody sent, in words that answer the
+#: question they are actually asking — did it work? "Merged" is what the
+#: system did; "we already had them" is what it means.
 FIX_STATUS = {
-    "pending": "waiting for review",
-    "approved": "approved",
-    "merged": "merged with someone already in the tree",
-    "rejected": "not accepted",
+    "pending": "waiting for someone to check it",
+    "approved": "on the tree",
+    "merged": "already on the tree — we had them once already",
+    "rejected": "not added",
+}
+
+#: The same four, short enough to survive a button label on a phone. The
+#: full sentence belongs on the screen you get after tapping it.
+FIX_STATUS_SHORT = {
+    "pending": "waiting",
+    "approved": "on the tree",
+    "merged": "already there",
+    "rejected": "not added",
 }
 
 

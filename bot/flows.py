@@ -525,6 +525,12 @@ ADD_CHILD = Flow(
 )
 
 
+#: Answers key the handlers inject with the thing being corrected, so the
+#: question can restate it. On a phone it has usually scrolled off the top by
+#: the time the question arrives.
+FIXING_KEY = "_fixing"
+
+
 CORRECTION = Flow(
     kind=submissions.CORRECTION,
     steps=[
@@ -534,7 +540,11 @@ CORRECTION = Flow(
         Step(
             "note",
             TEXT,
-            lambda a: texts.FIX_TREE_ASK if a.get("_tree_fix") else texts.FIX_ASK_NOTE,
+            lambda a: (
+                texts.FIX_TREE_ASK
+                if a.get("_tree_fix")
+                else texts.fix_ask_note(a.get(FIXING_KEY))
+            ),
         ),
     ],
     build=_build_correction,

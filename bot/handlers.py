@@ -671,7 +671,8 @@ def _echo_sentence(payload: dict[str, Any], who: dict[str, Any]) -> str:
         # A name fix names nobody new, so the relationship read-back has
         # nothing to say. What matters here is the before and the after.
         return texts.name_fix_confirm(
-            about.get("label") or "them",
+            texts.tagged(about.get("label"), payload.get("target_person_id"))
+            or "them",
             submissions.NAME_FIELDS.get(payload.get("field"), "name"),
             payload.get("was"),
             payload.get("now"),
@@ -765,6 +766,12 @@ async def on_person_confirm_text(update: Update, context: ContextTypes.DEFAULT_T
 async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload):
     """Name what just went in, then offer the obvious next moves — concrete,
     named, one tap each. "Add Sarkis's wife" beats a menu every time."""
+    if payload.get("kind") == submissions.NAME_FIX:
+        # The triage line already said what changed, in better words than
+        # "Got it —" plus the raw summary. Repeating it and then suggesting
+        # who to add next is two non-sequiturs in a row.
+        return await _show_menu(update, context)
+
     added = texts.ADDED.format(summary=submissions.describe(payload))
 
     entries = [
@@ -2998,7 +3005,7 @@ async def _start_correction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return PICK_SUBMISSION
 
     for item in mine:
-        status = texts.FIX_STATUS.get(item["status"], item["status"])
+        status = texts.FIX_STATUS_SHORT.get(item["status"], item["status"])
         label = f"{item['summary']} — {status}"
         rows.append([_button(_trim(label), f"{CB_FIX}:{item['id']}")])
     rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
@@ -3119,6 +3126,7 @@ async def on_pick_submission(update: Update, context: ContextTypes.DEFAULT_TYPE)
         target_person_id=chosen["person_id"],
         target_label=chosen["summary"],
     )
+    _state(context)["answers"][flows.FIXING_KEY] = chosen["summary"]
     return await _ask(update, context)
 
 

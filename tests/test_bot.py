@@ -2240,3 +2240,70 @@ class ANumberIsAWayInTests(BotTestCase):
         self.assertEqual(
             self.person(self.ids["boutros"])["given_name"], "Butros"
         )
+
+
+class TheWordsHaveToLandTests(BotTestCase):
+    """Prompts that need explaining have already failed.
+
+    Repeated feedback from first-time testers was "what does this mean".
+    These are the specific places it went wrong: a menu label promising less
+    than the screen behind it, system words where plain ones would do, and a
+    question about "it" arriving after "it" has scrolled off the top.
+    """
+
+    async def test_the_fix_menu_says_what_each_way_out_does(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        # Two different things happen behind these two buttons — one lands
+        # now, one goes to a person — and the screen has to say so.
+        self.assertIn("yourself", chat.text)
+        self.assertIn("admin", chat.text)
+
+    async def test_the_menu_label_does_not_promise_less_than_it_offers(self):
+        # It read "Fix something I submitted" while offering to correct
+        # anything on the tree, including people this contributor never sent.
+        chat = await self.identified_as_khalil()
+        self.assertNotIn("I submitted", texts.MENU_FIX)
+        await chat.tap(texts.MENU_FIX)
+        self.assertIn(texts.FIX_TREE, chat.buttons)
+
+    async def test_no_system_words_in_a_status(self):
+        for word in ("merged", "pending", "rejected", "approved"):
+            for shown in (*texts.FIX_STATUS.values(), *texts.FIX_STATUS_SHORT.values()):
+                self.assertNotIn(word, shown.lower())
+
+    async def test_asking_what_is_wrong_restates_the_thing(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)
+        await chat.tap("0")
+        await chat.tap("1")
+        await chat.say("Ritta")
+        await self.send_basket(chat)
+
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap("Ritta")
+        await chat.tap(texts.FIX_THIS)
+        # On a phone the thing being corrected has scrolled away by now.
+        self.assertIn("Ritta", chat.text)
+
+    async def test_the_read_back_carries_the_number(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.say(str(self.ids["boutros"]))
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        await chat.say("Butros")
+        self.assertIn(f"#{self.ids['boutros']}", chat.text)
+
+    async def test_a_finished_name_fix_does_not_talk_about_adding_people(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.say(str(self.ids["boutros"]))
+        await chat.tap(texts.NAME_FIX_GIVEN)
+        await chat.say("Butros")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        after = chat.transcript().split("Have I got that right?")[-1]
+        # It used to repeat the change as "Got it — ..." and then suggest
+        # who to add next, neither of which follows from renaming somebody.
+        self.assertNotIn(texts.ADDED.split("{")[0], after)
