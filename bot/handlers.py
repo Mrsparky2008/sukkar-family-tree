@@ -3081,7 +3081,7 @@ async def _pick_name_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rows.append(
             [_button(_trim(label), f"{CB_FIX}:name:{item['person_id']}")]
         )
-        if len(rows) >= 8:
+        if len(rows) >= 12:
             break
     rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
     # The list is their own circle, one tap each. A number is how everyone
@@ -3263,12 +3263,34 @@ async def on_pick_submission_text(update: Update, context: ContextTypes.DEFAULT_
     if not context.user_data.get("awaiting_name_target"):
         return await on_stray_text(update, context)
 
-    typed = (update.effective_message.text or "").strip().lstrip("#").strip()
-    if not typed.isdigit():
-        await _say(update, texts.NAME_FIX_NOT_A_NUMBER)
+    typed = (update.effective_message.text or "").strip()
+    number = typed.lstrip("#").strip()
+    if number.isdigit():
+        return await _start_name_fix(update, context, int(number))
+
+    # A name, then. A contributor's circle can run to fifty people, which is
+    # no use as a list of buttons, and a number means a trip to the chart and
+    # back. They almost always know the name — it is why they noticed.
+    found = await store.search_people(typed)
+    if not found:
+        await _say(update, texts.name_fix_no_such_name(typed))
         return PICK_SUBMISSION
 
-    return await _start_name_fix(update, context, int(typed))
+    if len(found) == 1:
+        return await _start_name_fix(update, context, found[0]["person_id"])
+
+    rows = [
+        [
+            _button(
+                _trim(texts.tagged(person["label"], person["person_id"])),
+                f"{CB_FIX}:name:{person['person_id']}",
+            )
+        ]
+        for person in found
+    ]
+    rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
+    await _say(update, texts.name_fix_which_one(typed), _kb(rows))
+    return PICK_SUBMISSION
 
 
 async def on_stray_text(update: Update, context: ContextTypes.DEFAULT_TYPE):

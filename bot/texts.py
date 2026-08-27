@@ -671,14 +671,20 @@ NAME_FIX_MENU = "✏️ A name is spelled wrong"
 
 NAME_FIX_NOBODY = (
     "Whose name is it?\n\n"
-    "Tap them below, or send the number beside their name on the tree — "
-    "like 27."
+    "Type any part of their name — I'll find them. Or tap somebody below."
 )
 
-NAME_FIX_NOT_A_NUMBER = (
-    "I need the number beside their name on the tree — just the digits, "
-    "like 27 — or tap one of the names above."
-)
+
+def name_fix_which_one(typed: str) -> str:
+    return f"More than one match for {typed}. Which of them?"
+
+
+def name_fix_no_such_name(typed: str) -> str:
+    return (
+        f"I can't find anybody called {typed} on the tree.\n\n"
+        "Try part of the name on its own, or send the number beside their "
+        "name on the chart."
+    )
 
 
 def name_fix_pick(who: str) -> str:
@@ -746,6 +752,13 @@ def name_fix_also_done(names: str) -> str:
 
 NAME_FIX_ALSO_YES = "Yes — change them too"
 NAME_FIX_ALSO_NO = "No — leave them as they are"
+
+
+NAME_FIX_NOBODY_TO_ASK = (
+    "Thanks — that one's with the family's admins.\n\n"
+    "I couldn't work out who's closest to them, so nothing changes until "
+    "a person has looked at it."
+)
 
 
 def name_fix_outranked(mine: str, theirs: str) -> str:

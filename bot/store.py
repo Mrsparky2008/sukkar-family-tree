@@ -510,8 +510,15 @@ def _review_name_fix(
                 "check_id": check_id,
                 "question": question,
             }
-        why = texts.name_fix_outranked(
-            weight["how_close"], weight["theirs_how_close"]
+        # Only say somebody was asked if somebody was. With nobody to ask —
+        # a person floating with no relations and no provenance — the honest
+        # answer is that it waits for an admin, not that a question is out.
+        why = (
+            texts.name_fix_outranked(
+                weight["how_close"], weight["theirs_how_close"]
+            )
+            if outreach
+            else texts.NAME_FIX_NOBODY_TO_ASK
         )
         return {
             "tier": "yellow",
@@ -915,6 +922,76 @@ async def people_named(given: str) -> list[dict[str, Any]]:
     """Everyone on the tree answering to this first name — the same-name
     problem, measured. Two or more means only a number settles it."""
     return await _run(_people_named, given)
+
+
+def _search_people(
+    conn: sqlite3.Connection, needle: str, limit: int = 12
+) -> list[dict[str, Any]]:
+    """Find somebody by any part of their name, best match first.
+
+    A contributor's own circle can run to fifty people, which is no use as a
+    list of buttons, and asking for a number means a trip to the chart and
+    back. Almost everybody knows the name of the person they are trying to
+    correct — that is why they noticed — so the name is the way in, and the
+    number comes back attached to each answer.
+
+    Matches a given name, a family name, or whatever else they go by, so
+    "Martha", "Allam" and "Martha Allam" all find the same woman.
+    """
+    wanted = " ".join(needle.casefold().split())
+    if not wanted:
+        return []
+    words = wanted.split()
+    found: list[tuple[int, str, dict[str, Any]]] = []
+
+    for row in db.get_people(conn):
+        given = (row["given_name"] or "").casefold()
+        family = (row["family_name"] or "").casefold()
+        alias = (row["also_known_as"] or "").casefold()
+        full = db.row_display_name(row).casefold()
+        haystack = f"{given} {family} {alias} {full}"
+
+        if given == wanted or full == wanted:
+            rank = 0
+        elif all(word in haystack for word in words):
+            # Every word they typed appears somewhere: "martha allam", and
+            # also "allam martha" for anyone who reaches for it that way.
+            rank = 1 if given.startswith(words[0]) else 2
+        else:
+            continue
+
+        found.append(
+            (rank, full, {
+                "person_id": row["id"],
+                "label": db.row_display_name(row),
+            })
+        )
+
+    if not found:
+        # Nothing matched literally. Somebody looking for a misspelling is
+        # searching for what they believe the name should be, not for the
+        # typo on the record — so "Alam" has to find the Allam they want to
+        # correct, or the tool is useless to the one person who needs it.
+        for row in db.get_people(conn):
+            best = max(
+                db.name_similarity(wanted, (row[field] or ""))
+                for field in ("given_name", "family_name", "also_known_as")
+            )
+            best = max(best, db.name_similarity(wanted, db.row_display_name(row)))
+            if best >= 0.8:
+                found.append(
+                    (3 - best, db.row_display_name(row).casefold(), {
+                        "person_id": row["id"],
+                        "label": db.row_display_name(row),
+                    })
+                )
+
+    found.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in found[:limit]]
+
+
+async def search_people(needle: str, limit: int = 12) -> list[dict[str, Any]]:
+    return await _run(_search_people, needle, limit)
 
 
 def _resolved_person_id(conn: sqlite3.Connection, ref: dict[str, Any]) -> int | None:

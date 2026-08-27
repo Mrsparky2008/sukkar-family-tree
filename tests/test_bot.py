@@ -2210,12 +2210,16 @@ class ANumberIsAWayInTests(BotTestCase):
         self.assertIn("Boutros", chat.text)
 
     async def test_somebody_off_the_button_list_is_reachable(self):
-        # The buttons only hold the immediate circle. A number has to reach
-        # everyone else, or it is not doing the job it was offered for.
+        # The buttons only ever hold a slice of the circle — a real one runs
+        # to fifty people. A number has to reach everybody else.
         chat = await self.open_the_list()
-        self.assertNotIn("Layla", str(chat.buttons))
-        await chat.say(str(self.ids["layla"]))
-        self.assertIn("Layla", chat.text)
+        conn = db.connect()
+        far = db.create_person(conn, "Nabiha", family_name="Sukkar", sex="F")
+        conn.commit()
+        conn.close()
+        self.assertNotIn("Nabiha", str(chat.buttons))
+        await chat.say(str(far))
+        self.assertIn("Nabiha", chat.text)
 
     async def test_a_number_nobody_has_says_so_and_stays_put(self):
         chat = await self.open_the_list()
@@ -2224,10 +2228,10 @@ class ANumberIsAWayInTests(BotTestCase):
         await chat.say(str(self.ids["boutros"]))
         self.assertIn("Boutros", chat.text)
 
-    async def test_words_get_a_nudge_not_a_dead_end(self):
+    async def test_a_name_nobody_has_is_a_nudge_not_a_dead_end(self):
         chat = await self.open_the_list()
-        await chat.say("my uncle")
-        self.assertIn(texts.NAME_FIX_NOT_A_NUMBER, chat.text)
+        await chat.say("Bartholomew")
+        self.assertIn("Bartholomew", chat.text)
         await chat.say(str(self.ids["boutros"]))
         self.assertIn("Boutros", chat.text)
 
@@ -2461,3 +2465,93 @@ class AlreadySpelledThatWayTests(BotTestCase):
     async def test_nothing_is_left_sitting_in_the_queue(self):
         await self.retype_what_it_says()
         self.assertEqual(self.queued()[-1]["status"], "rejected")
+
+
+class FindingSomebodyByNameTests(BotTestCase):
+    """"The ones I need to change didn't appear on that list."
+
+    A real contributor's circle runs to fifty people — parents, siblings,
+    both sets of grandparents, every aunt and uncle, then everyone they have
+    ever named. As buttons that is unusable, so it was cut short, and the
+    grandmother somebody actually wanted sat nineteenth. Asking for a number
+    instead means a trip to the chart and back.
+
+    They almost always know the name. It is why they noticed.
+    """
+
+    def setUp(self):
+        super().setUp()
+        conn = db.connect()
+        # A grandmother: far enough down the circle to fall off any list of
+        # buttons, close enough that a correction from here carries weight.
+        self.her = db.create_person(
+            conn, "Martha", family_name="Allam", sex="F"
+        )
+        db.update_person(conn, self.ids["nada"], mother_id=self.her)
+        # A real circle runs to fifty. Give this one enough siblings that the
+        # grandmother falls past the end of the buttons, the way she does on
+        # the live tree.
+        for n in range(12):
+            db.create_person(
+                conn, f"Sibling{n}", family_name="Sukkar", sex="M",
+                father_id=self.ids["youssef"], mother_id=self.ids["nada"],
+            )
+        conn.commit()
+        conn.close()
+
+    async def open_the_list(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        return chat
+
+    async def test_a_name_finds_somebody_off_the_buttons(self):
+        chat = await self.open_the_list()
+        self.assertNotIn("Martha", str(chat.buttons))
+        await chat.say("Martha")
+        self.assertIn("Martha", chat.text)
+        self.assertIn(texts.NAME_FIX_FAMILY, chat.buttons)
+
+    async def test_the_family_name_finds_her_too(self):
+        chat = await self.open_the_list()
+        await chat.say("Allam")
+        self.assertIn("Martha", chat.text)
+
+    async def test_the_spelling_they_believe_is_right_still_finds_her(self):
+        # The whole point is to correct a misspelling, so somebody searching
+        # for it types what they think it should be, not the typo on record.
+        chat = await self.open_the_list()
+        await chat.say("Alam")
+        self.assertIn("Martha", chat.text)
+
+    async def test_several_matches_ask_which(self):
+        conn = db.connect()
+        db.create_person(conn, "Martha", family_name="Obeid", sex="F")
+        conn.commit()
+        conn.close()
+        chat = await self.open_the_list()
+        await chat.say("Martha")
+        self.assertIn("Martha Allam", str(chat.buttons))
+        self.assertIn("Martha Obeid", str(chat.buttons))
+
+    async def test_the_numbers_come_back_with_the_answers(self):
+        conn = db.connect()
+        db.create_person(conn, "Martha", family_name="Obeid", sex="F")
+        conn.commit()
+        conn.close()
+        chat = await self.open_the_list()
+        await chat.say("Martha")
+        self.assertIn(f"#{self.her}", str(chat.buttons))
+
+    async def test_and_it_carries_through_to_the_change(self):
+        chat = await self.open_the_list()
+        await chat.say("Martha")
+        await chat.tap(texts.NAME_FIX_FAMILY)
+        await chat.say("Alam")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        self.assertEqual(self.person(self.her)["family_name"], "Alam")
+
+    async def test_a_number_still_works(self):
+        chat = await self.open_the_list()
+        await chat.say(str(self.her))
+        self.assertIn("Martha", chat.text)
