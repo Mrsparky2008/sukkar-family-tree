@@ -2555,3 +2555,66 @@ class FindingSomebodyByNameTests(BotTestCase):
         chat = await self.open_the_list()
         await chat.say(str(self.her))
         self.assertIn("Martha", chat.text)
+
+
+class EveryButtonOnTheScreenDoesSomethingTests(BotTestCase):
+    """A tap that matches nothing is dropped in silence.
+
+    No reply, no error, no log line — the button simply does not work, and
+    there is nothing to debug from. That is what happened after a name fix
+    that ended in the "spell the rest of the line" offer: the offer is
+    answered by a handler outside the conversation, which cannot set a
+    state, so the menu drawn afterwards had no state to be tapped in and
+    every one of its buttons was dead.
+    """
+
+    def setUp(self):
+        super().setUp()
+        conn = db.connect()
+        self.father = self.ids["khalil_y"]
+        db.create_person(
+            conn, "Toufic", family_name="Sukkar", sex="M", father_id=self.father
+        )
+        conn.commit()
+        conn.close()
+
+    async def fix_a_name_and_answer_the_offer(self, answer):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.NAME_FIX_MENU)
+        await chat.say(str(self.father))
+        await chat.tap(texts.NAME_FIX_FAMILY)
+        await chat.say("Sukar")
+        await chat.tap(texts.CONFIRM_CORRECT)
+        await chat.tap(answer)
+        return chat
+
+    async def test_the_corner_still_opens_after_saying_yes(self):
+        chat = await self.fix_a_name_and_answer_the_offer(texts.NAME_FIX_ALSO_YES)
+        await chat.tap(texts.MENU_VIEW)
+        self.assertIn("corner", chat.text.lower())
+
+    async def test_the_corner_still_opens_after_saying_no(self):
+        chat = await self.fix_a_name_and_answer_the_offer(texts.NAME_FIX_ALSO_NO)
+        await chat.tap(texts.MENU_VIEW)
+        self.assertIn("corner", chat.text.lower())
+
+    async def test_every_button_that_menu_offers_works(self):
+        chat = await self.fix_a_name_and_answer_the_offer(texts.NAME_FIX_ALSO_YES)
+        offered = dict(chat.buttons)
+        self.assertTrue(offered, "a menu should be on the screen")
+        for label, data in offered.items():
+            if data.startswith("http"):
+                continue  # a link button; Telegram opens it, we never see it
+            chat.state = None      # the worst case: no state at all
+            await chat.tap(label)  # raises if nothing handles it
+            await chat.tap(texts.BACK_TO_MENU) if texts.BACK_TO_MENU in chat.buttons else None
+
+    async def test_a_menu_tap_is_never_dropped_whatever_the_state(self):
+        # The general case: a keyboard outlives the state it was drawn in —
+        # a restart, or a stale message someone scrolls back to.
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_ADD_CHILD)   # deep inside a flow now
+        chat.state = None                      # ...and the state is gone
+        await chat.tap(texts.MENU_VIEW)
+        self.assertIn("corner", chat.text.lower())

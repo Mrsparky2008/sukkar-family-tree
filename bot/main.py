@@ -158,6 +158,13 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
             ],
         },
         fallbacks=[
+            # A keyboard on the screen must always do something. Menu buttons
+            # outlive the state they were drawn in — a restart, or a handler
+            # outside the conversation drawing one — and a tap that matches
+            # nothing is dropped in silence: no reply, no error, no log line,
+            # nothing to debug from. Catching them here ends that whole class.
+            CallbackQueryHandler(handlers.on_review, pattern=r"^menu:review$"),
+            CallbackQueryHandler(handlers.on_menu, pattern=r"^menu:"),
             CommandHandler("cancel", handlers.cancel),
             CommandHandler("start", handlers.start),
             # The admin's queue, from any state — the desk checks who asks.

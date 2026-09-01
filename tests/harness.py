@@ -144,6 +144,11 @@ class Conversation:
             if data is None and isinstance(handler, MessageHandler):
                 self.state = await handler.callback(update, self.context)
                 return self.state
+            if data is not None and isinstance(handler, CallbackQueryHandler):
+                pattern = getattr(handler, "pattern", None)
+                if pattern is not None and pattern.match(data):
+                    self.state = await handler.callback(update, self.context)
+                    return self.state
 
         # Some buttons ride outside the conversation entirely — a peer check,
         # or an offer that follows a correction — because by the time they are

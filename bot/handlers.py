@@ -774,7 +774,10 @@ async def _after_add(update: Update, context: ContextTypes.DEFAULT_TYPE, payload
         if context.user_data.get("spell_the_line"):
             # A question is on screen waiting to be answered. Putting a menu
             # under it buries it and offers a way past it in the same breath.
-            return
+            # Still land in MENU: the offer is answered by a handler outside
+            # the conversation, which cannot set a state, so the menu drawn
+            # after it would have had no state to be tapped in.
+            return MENU
         return await _show_menu(update, context)
 
     added = texts.ADDED.format(summary=submissions.describe(payload))
