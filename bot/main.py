@@ -15,6 +15,7 @@ import logging
 import sys
 import warnings
 
+from telegram import Update
 from telegram.warnings import PTBUserWarning
 from telegram.ext import (
     Application,
@@ -23,6 +24,7 @@ from telegram.ext import (
     ConversationHandler,
     MessageHandler,
     PicklePersistence,
+    TypeHandler,
     filters,
 )
 
@@ -191,6 +193,9 @@ def build_application(token: str | None = None) -> Application:
         .persistence(PicklePersistence(filepath=state_path))
         .build()
     )
+    # Group -1: sees every update before anything else and consumes none, so
+    # there is a record of a tap even when nothing goes on to handle it.
+    application.add_handler(TypeHandler(Update, handlers.trace), group=-1)
     application.add_handler(build_conversation())
     application.add_handler(CommandHandler("share", handlers.share))
     application.add_handler(CommandHandler("help", handlers.help_command))

@@ -2618,3 +2618,47 @@ class EveryButtonOnTheScreenDoesSomethingTests(BotTestCase):
         chat.state = None                      # ...and the state is gone
         await chat.tap(texts.MENU_VIEW)
         self.assertIn("corner", chat.text.lower())
+
+
+class ThereIsAlwaysSomethingToLookAtTests(BotTestCase):
+    """A failure has to leave a trace.
+
+    Twice a button has done nothing and there was no way to tell whether the
+    tap even arrived: the bot logged errors only, and a tap that matches no
+    handler raises none. What is recorded is the fact of an interaction and
+    how the bot sees the person — never what they typed, because their
+    answers are family names and relationships and those belong in the queue
+    with a reviewer, not in a log file.
+    """
+
+    async def test_a_tap_is_recorded(self):
+        with self.assertLogs("bot.handlers", level="INFO") as caught:
+            chat = await self.identified_as_khalil()
+            await chat.tap(texts.MENU_VIEW)
+        self.assertTrue(any("tapped" in line for line in caught.output))
+
+    async def test_what_somebody_typed_is_never_written_down(self):
+        with self.assertLogs("bot.handlers", level="INFO") as caught:
+            chat = Conversation(user_id=5555)
+            await chat.start()
+            await chat.say("Mahboobeh")
+        written = "\n".join(caught.output)
+        self.assertNotIn("Mahboobeh", written)
+        self.assertIn("chars", written)
+
+    async def test_being_bounced_to_sign_in_says_why(self):
+        chat = Conversation(user_id=5556)
+        await chat.start()
+        with self.assertLogs("bot.handlers", level="WARNING") as caught:
+            # A menu button from before they signed in — the shape of a stale
+            # keyboard somebody scrolls back to.
+            chat.state = 0
+            await chat.tap_data("menu:view")
+        line = "\n".join(caught.output)
+        self.assertIn("sign-in", line)
+        self.assertIn("person=None", line)
+
+    async def test_somebody_the_tree_knows_is_never_bounced(self):
+        chat = await self.identified_as_khalil()
+        with self.assertNoLogs("bot.handlers", level="WARNING"):
+            await chat.tap(texts.MENU_VIEW)

@@ -1517,6 +1517,31 @@ async def on_counted_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================================================================
 
 
+async def trace(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """One line per interaction, so a failure leaves something to look at.
+
+    Twice now a button has simply done nothing, and there was no way to tell
+    whether the tap even arrived — the bot logged only errors, and a tap that
+    matches no handler raises none. This records the fact of an interaction
+    and how the bot sees the person, never what they typed: their answers are
+    family names and relationships, and those belong in the queue with a
+    reviewer, not in a log file.
+    """
+    user = update.effective_user
+    if user is None:
+        return
+    message = update.effective_message
+    if update.callback_query is not None:
+        what = f"tapped {update.callback_query.data!r}"
+    elif message is not None and message.text:
+        # The length only. Enough to tell a name from a paragraph, and to see
+        # that something arrived at all.
+        what = f"typed {len(message.text)} chars"
+    else:
+        what = "sent something else"
+    log.info("user %s %s", user.id, what)
+
+
 async def _sign_in_first(update, context) -> int | None:
     """Send anyone the tree cannot attach work to back to the beginning.
 
@@ -1526,6 +1551,15 @@ async def _sign_in_first(update, context) -> int | None:
     who = await store.contributor_state(update.effective_user.id)
     if who["person_id"] is not None or who["identify_submission_id"] is not None:
         return None
+    # Being asked who you are when the tree already knows is the single most
+    # confusing thing this bot can do, so say why it happened.
+    log.warning(
+        "sending user %s back to sign-in: known=%s person=%s identify=%s",
+        update.effective_user.id,
+        who.get("known"),
+        who.get("person_id"),
+        who.get("identify_submission_id"),
+    )
     await _say(update, texts.SIGN_IN_FIRST)
     _begin(context, flows.IDENTIFY)
     return await _ask(update, context)

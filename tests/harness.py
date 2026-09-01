@@ -112,7 +112,9 @@ class Conversation:
         )
 
     async def start(self) -> int | None:
-        self.state = await handlers.start(self._update("/start"), self.context)
+        update = self._update("/start")
+        await handlers.trace(update, self.context)
+        self.state = await handlers.start(update, self.context)
         return self.state
 
     async def say(self, text: str) -> int | None:
@@ -128,6 +130,10 @@ class Conversation:
         return await self._dispatch(self._update(data=data), data=data)
 
     async def _dispatch(self, update, data: str | None) -> int | None:
+        # The real application runs this on every update, in a group of its
+        # own that consumes nothing. Skipping it here would leave the one
+        # thing added for debugging as the one thing never exercised.
+        await handlers.trace(update, self.context)
         candidates = self._conversation_handler.states.get(self.state, [])
         for handler in candidates:
             if data is not None and isinstance(handler, CallbackQueryHandler):
