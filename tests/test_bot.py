@@ -2662,3 +2662,71 @@ class ThereIsAlwaysSomethingToLookAtTests(BotTestCase):
         chat = await self.identified_as_khalil()
         with self.assertNoLogs("bot.handlers", level="WARNING"):
             await chat.tap(texts.MENU_VIEW)
+
+
+class AskingToLookAtSomethingIsNotAnAnswerTests(BotTestCase):
+    """"Show me my corner of the tree", typed halfway through a question.
+
+    It was read as dictation and a relative called Corner came out of it.
+    Asking to look at something is not an answer, and it is not an
+    instruction to throw away what you were halfway through typing either —
+    so the drawing appears and the question comes back.
+    """
+
+    async def midway(self, user_id: int = 5001):
+        chat = await self.identified_as_khalil(user_id)
+        await chat.tap(texts.MENU_ADD_SPOUSE)
+        return chat
+
+    async def test_it_shows_the_tree_instead_of_inventing_a_relative(self):
+        chat = await self.midway()
+        await chat.say("show me my corner of the tree")
+        self.assertNotIn("Corner", chat.transcript())
+
+    async def test_the_question_comes_back(self):
+        chat = await self.midway()
+        before = chat.text
+        await chat.say("show me my corner of the tree")
+        self.assertEqual(chat.text, before)
+
+    async def test_the_flow_carries_on_from_where_it_was(self):
+        chat = await self.midway()
+        asked = chat.text
+        await chat.say("show me my corner of the tree")
+        await chat.say("Therese")
+        # The same question was answered and the flow moved on.
+        self.assertNotEqual(chat.text, asked)
+
+    async def test_a_one_word_answer_is_still_a_name(self):
+        # Somebody genuinely called something in that list must not be eaten
+        # by the tree-request rule.
+        chat = await self.midway()
+        asked = chat.text
+        await chat.say("Chart")
+        self.assertNotEqual(chat.text, asked)
+        self.assertNotIn("corner of the tree", chat.text.lower())
+
+    async def test_a_correction_mentioning_the_tree_is_still_a_correction(self):
+        # The words are competing with a real answer here, so a note that
+        # happens to say "tree" must not be mistaken for a request to see it.
+        chat = await self.identified_as_khalil(user_id=5003)
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.FIX_TREE)
+        await chat.say("#3 marriage isn't on the tree")
+        self.assertIn(texts.SEND_IT, chat.buttons)
+
+    async def test_a_note_about_nobody_asks_who_rather_than_crashing(self):
+        chat = await self.identified_as_khalil(user_id=5004)
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.FIX_TREE)
+        await chat.say("something is wrong somewhere")
+        self.assertIn(texts.FIX_TREE_WHO, chat.text)
+        self.assertNotIn("went wrong on my end", chat.text)
+
+    async def test_and_the_number_gets_it_through(self):
+        chat = await self.identified_as_khalil(user_id=5005)
+        await chat.tap(texts.MENU_FIX)
+        await chat.tap(texts.FIX_TREE)
+        await chat.say("something is wrong somewhere")
+        await chat.say("#3 has the wrong wife")
+        self.assertIn(texts.SEND_IT, chat.buttons)

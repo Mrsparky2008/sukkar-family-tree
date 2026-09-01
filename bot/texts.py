@@ -775,6 +775,13 @@ NAME_FIX_QUEUED = (
 )
 
 
+FIX_TREE_WHO = (
+    "I need to know who this is about before I can pass it on.\n\n"
+    "Send it again with their number from the tree — like \"#27 is spelled "
+    "Sukar\" — or with a name only one person on the tree has."
+)
+
+
 def fix_tree_about(people: str) -> str:
     return f"That's about: {people}."
 

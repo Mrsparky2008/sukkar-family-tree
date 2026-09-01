@@ -552,12 +552,20 @@ async def _resolve_tree_correction(
                     (found[0]["person_id"], found[0]["label"])
                 )
 
-    if people:
-        state["extra"]["target_person_id"] = people[0][0]
-        state["extra"]["target_label"] = people[0][1]
-        state["answers"]["_about_people"] = ", ".join(
-            texts.tagged(label, pid) for pid, label in people
-        )
+    if not people:
+        # A correction has to name what it is correcting, or an admin gets a
+        # complaint with no subject. Reaching the queue without one used to
+        # fail validation and surface as "something went wrong on my end",
+        # which is a crash where a question belongs.
+        again()
+        await _say(update, texts.FIX_TREE_WHO)
+        return ASK
+
+    state["extra"]["target_person_id"] = people[0][0]
+    state["extra"]["target_label"] = people[0][1]
+    state["answers"]["_about_people"] = ", ".join(
+        texts.tagged(label, pid) for pid, label in people
+    )
     return None
 
 
@@ -1696,6 +1704,22 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await _ask(update, context)
         state["answers"][step.id] = chosen
         state["index"] += 1
+        return await _ask(update, context)
+
+    # Asking to see the tree is not an answer to the question on screen.
+    # Mid-flow it was being read as dictation, so "show me my corner of the
+    # tree" became somebody's relative called Corner. Show the drawing and
+    # put the question back: they asked to look at something, not to
+    # abandon what they were halfway through typing.
+    if step.type in (flows.NAME, flows.TEXT) and _asks_to_see_the_tree(typed):
+        drawing = await _sketch_of(update, context)
+        await _say(
+            update,
+            (html_escape_module.escape(texts.SKETCH_HEADING) + "\n" + drawing)
+            if drawing
+            else texts.SKETCH_EMPTY,
+            html=bool(drawing),
+        )
         return await _ask(update, context)
 
     # Somebody who already knows will type the whole family in one go. The
@@ -3236,6 +3260,26 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _say(update, texts.HELP)
+
+
+def _asks_to_see_the_tree(typed: str) -> bool:
+    """A request to look at the tree, strict enough to use mid-question.
+
+    At the menu, naming the tree at all is enough — there is nothing else it
+    could mean. Mid-flow the words are competing with a real answer, so this
+    wants a verb of looking as well: "show me the tree" is a request, while
+    a correction reading "his marriage isn't on the tree" is not.
+    """
+    import re as _re
+
+    if len(typed.split()) < 2:
+        return False  # a one-word answer is a name
+    return bool(
+        _re.search(r"\b(show|see|view|display|open|where)\b", typed, _re.I)
+        and _re.search(
+            r"\b(sketch|tree|drawing|picture|chart|corner|so far)\b", typed, _re.I
+        )
+    )
 
 
 def _asks_for_sketch(typed: str) -> bool:
