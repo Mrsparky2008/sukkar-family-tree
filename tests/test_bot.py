@@ -356,6 +356,7 @@ class MenuTests(BotTestCase):
                 texts.MENU_SWITCH,
                 texts.MENU_FIX,
                 texts.MENU_VIEW,
+                texts.MENU_RELATE,
             },
         )
 
@@ -2730,3 +2731,66 @@ class AskingToLookAtSomethingIsNotAnAnswerTests(BotTestCase):
         await chat.say("something is wrong somewhere")
         await chat.say("#3 has the wrong wife")
         self.assertIn(texts.SEND_IT, chat.buttons)
+
+
+class AskingHowTwoPeopleAreRelatedTests(BotTestCase):
+    """From the menu, in two answers, from anyone to anyone."""
+
+    async def ask(self, first: str, second: str, user_id: int = 5001):
+        chat = await self.identified_as_khalil(user_id)
+        await chat.tap(texts.MENU_RELATE)
+        if first == "me":
+            await chat.tap(texts.RELATE_ME)
+        else:
+            await chat.say(first)
+        await chat.say(second)
+        return chat
+
+    async def test_from_me_to_a_relative(self):
+        chat = await self.ask("me", str(self.ids["boutros"]))
+        self.assertIn("uncle", chat.text)
+
+    async def test_between_two_other_people(self):
+        chat = await self.ask(
+            str(self.ids["mariam"]), str(self.ids["elias"])
+        )
+        self.assertIn("great-grandfather", chat.text)
+
+    async def test_a_name_works_as_well_as_a_number(self):
+        # "Boutros" also matches his nephew Antoun Boutros, so it asks which —
+        # the same-name problem, answered with numbers as everywhere else.
+        chat = await self.ask("me", "Boutros")
+        self.assertIn("Which of them?", chat.text)
+        await chat.tap(f"#{self.ids['boutros']}")
+        self.assertIn("uncle", chat.text)
+
+    async def test_the_numbers_come_with_the_answer(self):
+        chat = await self.ask("me", str(self.ids["boutros"]))
+        self.assertIn(f"#{self.ids['boutros']}", chat.text)
+
+    async def test_it_says_where_they_meet(self):
+        chat = await self.ask("me", str(self.ids["boutros"]))
+        self.assertIn("meet at", chat.text)
+
+    async def test_you_can_ask_again_without_going_back(self):
+        chat = await self.ask("me", str(self.ids["boutros"]))
+        self.assertIn(texts.RELATE_AGAIN, chat.buttons)
+        await chat.tap(texts.RELATE_AGAIN)
+        self.assertIn(texts.RELATE_ME, chat.buttons)
+
+    async def test_two_people_with_nothing_between_them_are_told_so(self):
+        conn = db.connect()
+        loner = db.create_person(conn, "Nabiha", family_name="Sukkar", sex="F")
+        conn.commit()
+        conn.close()
+        chat = await self.ask("me", str(loner))
+        self.assertIn("Nothing on the tree joins", chat.text)
+
+    async def test_a_name_nobody_has_asks_again_rather_than_giving_up(self):
+        chat = await self.identified_as_khalil()
+        await chat.tap(texts.MENU_RELATE)
+        await chat.say("Bartholomew")
+        self.assertIn("Bartholomew", chat.text)
+        await chat.tap(texts.RELATE_ME)
+        await chat.say(str(self.ids["boutros"]))
+        self.assertIn("uncle", chat.text)

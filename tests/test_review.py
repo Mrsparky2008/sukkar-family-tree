@@ -1814,3 +1814,100 @@ class ASpellingRunsDownwardOnlyTests(ReviewTestCase):
             row["id"] for row in db.inherited_spelling(self.conn, self.me, "Sukar")
         }
         self.assertNotIn(outside, swept)
+
+
+class WhoIsHeToMeTests(ReviewTestCase):
+    """The question the tree exists to answer.
+
+    Nobody can work it out from a drawing once the drawing is bigger than a
+    page, and the answer comes from the shape of the path rather than its
+    length: two up and two down is a cousin, one up and three down is a
+    great-uncle, and both are four steps apart.
+    """
+
+    def setUp(self):
+        super().setUp()
+        make = lambda name, sex, f=None, m=None: db.create_person(
+            self.conn, name, sex=sex, father_id=f, mother_id=m
+        )
+        self.great = make("Sarkis", "M")
+        self.grandfather = make("Toufic", "M", self.great)
+        self.granduncle = make("Lichaa", "M", self.great)
+        self.father = make("Kalim", "M", self.grandfather)
+        self.aunt = make("Saide", "F", self.grandfather)
+        self.me = make("Steven", "M", self.father)
+        self.brother = make("Joseph", "M", self.father)
+        self.son = make("Henri", "M", self.me)
+        self.grandson = make("Tony", "M", self.son)
+        self.nephew = make("Marco", "M", self.brother)
+        self.cousin = make("Massoud", "M", None, self.aunt)
+        self.second_cousin_parent = make("Raffoul", "M", self.granduncle)
+        self.second_cousin = make("Fadi", "M", self.second_cousin_parent)
+
+        self.wife = db.create_person(self.conn, "Louisa", sex="F")
+        db.create_union(self.conn, self.me, self.wife)
+        self.brothers_wife = db.create_person(self.conn, "Mary", sex="F")
+        db.create_union(self.conn, self.brother, self.brothers_wife)
+        self.stranger = db.create_person(self.conn, "Nobody", sex="M")
+
+    def word(self, other):
+        found = db.relationship(self.conn, self.me, other)
+        return found["phrase"] if found else None
+
+    def test_the_line_straight_up(self):
+        self.assertEqual(self.word(self.father), "father")
+        self.assertEqual(self.word(self.grandfather), "grandfather")
+        self.assertEqual(self.word(self.great), "great-grandfather")
+
+    def test_the_line_straight_down(self):
+        self.assertEqual(self.word(self.son), "son")
+        self.assertEqual(self.word(self.grandson), "grandson")
+
+    def test_sideways(self):
+        self.assertEqual(self.word(self.brother), "brother")
+        self.assertEqual(self.word(self.nephew), "nephew")
+        self.assertEqual(self.word(self.aunt), "aunt")
+        self.assertEqual(self.word(self.granduncle), "great-uncle")
+
+    def test_cousins_count_properly(self):
+        self.assertEqual(self.word(self.cousin), "first cousin")
+        self.assertEqual(self.word(self.second_cousin), "second cousin")
+        self.assertEqual(
+            self.word(self.second_cousin_parent), "first cousin once removed"
+        )
+
+    def test_sex_decides_the_word_not_the_shape(self):
+        self.assertEqual(self.word(self.aunt), "aunt")
+        niece = db.create_person(
+            self.conn, "Rita", sex="F", father_id=self.brother
+        )
+        self.assertEqual(self.word(niece), "niece")
+
+    def test_a_cousin_through_a_mother_counts_the_same(self):
+        # Half this family reaches you through its women. A tree that only
+        # walks fathers would call this person a stranger.
+        self.assertEqual(self.word(self.cousin), "first cousin")
+
+    def test_marriage_is_said_as_a_path(self):
+        self.assertEqual(self.word(self.wife), "wife")
+        self.assertEqual(self.word(self.brothers_wife), "brother's wife")
+
+    def test_it_reads_from_whoever_is_asking(self):
+        found = db.relationship(self.conn, self.son, self.brother)
+        self.assertEqual(found["phrase"], "uncle")
+
+    def test_nobody_connected_is_said_plainly(self):
+        self.assertIsNone(db.relationship(self.conn, self.me, self.stranger))
+
+    def test_a_chain_of_marriages_is_not_given_a_word_it_has_not_got(self):
+        # Two marriages apart is not a relationship anybody would claim, and
+        # following spouse links onward never ends.
+        far = db.create_person(self.conn, "Ziad", sex="M")
+        db.create_union(self.conn, self.brothers_wife, far)
+        found = db.relationship(self.conn, self.me, far)
+        self.assertEqual(found["kind"], "distant")
+        self.assertGreater(found["steps"], 0)
+
+    def test_it_names_where_two_people_meet(self):
+        found = db.relationship(self.conn, self.me, self.cousin)
+        self.assertEqual(found["through"], self.grandfather)

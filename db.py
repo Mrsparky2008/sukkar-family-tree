@@ -1425,6 +1425,210 @@ def corroborate(
 # ===========================================================================
 
 
+# ===========================================================================
+# How two people are related
+# ===========================================================================
+#
+# A distance answers "how close", which is what the review desk needs. It does
+# not answer "who is he to me", which is what a person wants. That needs the
+# shape of the path, not its length: two steps up and two down is a cousin,
+# one up and three down is a great-uncle, and both are four steps.
+#
+# So this finds the nearest ancestor the two share and reads the answer off
+# the two heights. Everything else — in-laws, step-relations by marriage — is
+# said in plain words rather than forced into a single term, because "your
+# sister's husband" is understood everywhere and "brother-in-law" quietly
+# means three different things.
+# ===========================================================================
+
+
+def _ancestors(
+    conn: sqlite3.Connection, person_id: int, limit: int = 15
+) -> dict[int, int]:
+    """Every ancestor of this person, and how many generations up they are.
+
+    Both parents, so a cousin through a mother counts exactly as much as one
+    through a father — the family is a graph, and half of it is women.
+    """
+    depths = {person_id: 0}
+    frontier = [person_id]
+    for step in range(1, limit + 1):
+        following: list[int] = []
+        for current in frontier:
+            row = conn.execute(
+                "SELECT father_id, mother_id FROM people WHERE id = ?", (current,)
+            ).fetchone()
+            if row is None:
+                continue
+            for parent in (row["father_id"], row["mother_id"]):
+                if parent and parent not in depths:
+                    depths[parent] = step
+                    following.append(parent)
+        if not following:
+            break
+        frontier = following
+    return depths
+
+
+#: Nth generation up and down, as a word rather than a count.
+_UP = {1: "father", 2: "grandfather", 3: "great-grandfather"}
+_UP_F = {1: "mother", 2: "grandmother", 3: "great-grandmother"}
+_DOWN = {1: "son", 2: "grandson", 3: "great-grandson"}
+_DOWN_F = {1: "daughter", 2: "granddaughter", 3: "great-granddaughter"}
+
+
+def _greats(word: str, generations: int, base: int) -> str:
+    """"great-great-grandfather" — spelled out rather than counted at you."""
+    return "great-" * (generations - base) + word
+
+
+def _ordinal(n: int) -> str:
+    return {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth"}.get(
+        n, f"{n}th"
+    )
+
+
+def _removed(n: int) -> str:
+    if n == 0:
+        return ""
+    if n == 1:
+        return " once removed"
+    if n == 2:
+        return " twice removed"
+    return f" {n} times removed"
+
+
+def _blood_word(up_a: int, up_b: int, sex: str | None) -> str:
+    """What B is to A, given how far each stands below their shared ancestor.
+
+    `up_a` is how many generations from A up to the ancestor they share, and
+    `up_b` the same for B. Everything falls out of those two numbers.
+    """
+    female = sex == "F"
+
+    if up_b == 0:                      # the shared ancestor is B: B is above A
+        if up_a == 1:
+            return "mother" if female else "father"
+        table = _UP_F if female else _UP
+        return table.get(up_a) or _greats(
+            "grandmother" if female else "grandfather", up_a, 2
+        )
+
+    if up_a == 0:                      # the shared ancestor is A: B is below A
+        if up_b == 1:
+            return "daughter" if female else "son"
+        table = _DOWN_F if female else _DOWN
+        return table.get(up_b) or _greats(
+            "granddaughter" if female else "grandson", up_b, 2
+        )
+
+    if up_a == 1 and up_b == 1:
+        return "sister" if female else "brother"
+
+    if up_a == 1:                      # B is below A's own parent
+        if up_b == 2:
+            return "niece" if female else "nephew"
+        return _greats("niece" if female else "nephew", up_b - 1, 1)
+
+    if up_b == 1:                      # A is below B's own parent
+        if up_a == 2:
+            return "aunt" if female else "uncle"
+        return _greats("aunt" if female else "uncle", up_a - 1, 1)
+
+    # Cousins. The degree is how far the nearer of them stands below the
+    # shared ancestor; the remove is the difference between them.
+    degree = min(up_a, up_b) - 1
+    return f"{_ordinal(degree)} cousin{_removed(abs(up_a - up_b))}"
+
+
+def _blood_relationship(
+    conn: sqlite3.Connection, a: int, b: int
+) -> dict[str, Any] | None:
+    """How B is related to A by descent alone. None if only marriage links them."""
+    if a == b:
+        return {"kind": "self", "phrase": "the same person"}
+
+    mine = _ancestors(conn, a)
+    theirs = _ancestors(conn, b)
+    shared = set(mine) & set(theirs)
+    if shared:
+        # The nearest shared ancestor: fewest generations overall, and among
+        # equals the one that keeps the two sides most even.
+        best = min(shared, key=lambda pid: (mine[pid] + theirs[pid],
+                                            abs(mine[pid] - theirs[pid])))
+        row = get_person(conn, b)
+        word = _blood_word(mine[best], theirs[best], row["sex"] if row else None)
+        return {
+            "kind": "blood",
+            "phrase": word,
+            "through": best,
+            "through_label": row_display_name(get_person(conn, best)),
+            "steps_up": mine[best],
+            "steps_down": theirs[best],
+        }
+
+    return None
+
+
+def relationship(
+    conn: sqlite3.Connection, a: int, b: int
+) -> dict[str, Any] | None:
+    """How B is related to A, in words. None when nothing connects them.
+
+    Blood first, then one step through a marriage — one, deliberately. Two
+    marriages apart is not a relationship anybody would claim out loud, and
+    following spouse links onward has no natural end: every husband has a
+    wife who has a husband.
+
+    A marriage answer is phrased as a path — "your sister's husband" —
+    because that is what people say, and because "brother-in-law" means
+    three different things depending on who is asking.
+    """
+    direct = _blood_relationship(conn, a, b)
+    if direct is not None:
+        return direct
+
+    # B married into A's family.
+    for partner in get_partners(conn, b):
+        found = _blood_relationship(conn, a, partner["id"])
+        if found is None:
+            continue
+        row = get_person(conn, b)
+        spouse_word = "wife" if (row and row["sex"] == "F") else "husband"
+        if found["kind"] == "self":
+            return {"kind": "marriage", "phrase": spouse_word}
+        return {
+            "kind": "marriage",
+            "phrase": f"{found['phrase']}'s {spouse_word}",
+        }
+
+    # A married into B's family.
+    for partner in get_partners(conn, a):
+        found = _blood_relationship(conn, partner["id"], b)
+        if found is None or found["kind"] == "self":
+            continue
+        row = get_person(conn, a)
+        mine_word = "wife" if (row and row["sex"] == "F") else "husband"
+        return {
+            "kind": "marriage",
+            "phrase": f"your {mine_word}'s {found['phrase']}",
+            "already_owned": True,
+        }
+
+    # No shared ancestor and no single marriage between them. That is not the
+    # same as nothing: in a family where cousins marry cousins, most pairs are
+    # joined by a chain of marriages nobody has a word for. Say how far, and
+    # say why there is no word, rather than implying they are strangers.
+    steps = relationship_distance(conn, a, b, limit=10)
+    if steps is not None:
+        return {
+            "kind": "distant",
+            "phrase": "related through marriages rather than by blood",
+            "steps": steps,
+        }
+    return None
+
+
 def relationship_distance(
     conn: sqlite3.Connection, a: int, b: int, limit: int = 8
 ) -> int | None:

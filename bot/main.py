@@ -152,6 +152,12 @@ def _conversation(cancel_button: CallbackQueryHandler) -> ConversationHandler:
                 cancel_button,
                 MessageHandler(TEXT_ANSWER, handlers.on_pick_submission_text),
             ],
+            handlers.RELATE: [
+                CallbackQueryHandler(handlers.on_relate_button, pattern=r"^rel:"),
+                CallbackQueryHandler(handlers.on_menu, pattern=r"^menu:"),
+                cancel_button,
+                MessageHandler(TEXT_ANSWER, handlers.on_relate_text),
+            ],
             handlers.REVIEW_DESK: [
                 CallbackQueryHandler(
                     handlers.on_review_desk_button, pattern=r"^adm:"

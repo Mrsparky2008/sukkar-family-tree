@@ -924,6 +924,31 @@ async def people_named(given: str) -> list[dict[str, Any]]:
     return await _run(_people_named, given)
 
 
+def _how_related(
+    conn: sqlite3.Connection, a: int, b: int
+) -> dict[str, Any] | None:
+    """How B is related to A, with both names, ready to put in a sentence."""
+    first, second = db.get_person(conn, a), db.get_person(conn, b)
+    if first is None or second is None:
+        return None
+    found = db.relationship(conn, a, b)
+    return {
+        "a": {"person_id": a, "label": db.row_display_name(first)},
+        "b": {"person_id": b, "label": db.row_display_name(second)},
+        "found": found,
+        "through": (
+            {"person_id": found["through"],
+             "label": found.get("through_label")}
+            if found and found.get("through")
+            else None
+        ),
+    }
+
+
+async def how_related(a: int, b: int) -> dict[str, Any] | None:
+    return await _run(_how_related, a, b)
+
+
 def _search_people(
     conn: sqlite3.Connection, needle: str, limit: int = 12
 ) -> list[dict[str, Any]]:

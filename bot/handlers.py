@@ -50,7 +50,8 @@ log = logging.getLogger(__name__)
     CONFIRM_PERSON,
     COUNTED,
     REVIEW_DESK,
-) = range(16)
+    RELATE,
+) = range(17)
 
 # --- callback data ---------------------------------------------------------
 
@@ -84,6 +85,7 @@ CB_REDO = "redo"
 CB_NEXT = "next"
 CB_COUNT = "cnt"
 CB_SPELL = "spell"
+CB_RELATE = "rel"
 
 
 # ===========================================================================
@@ -395,6 +397,7 @@ def _menu_keyboard(
     rows.append([_button(texts.MENU_SWITCH, CB_SWITCH)])
     rows.append([_button(texts.MENU_FIX, f"{CB_MENU}:{submissions.CORRECTION}")])
     rows.append([_button(texts.MENU_VIEW, f"{CB_MENU}:view")])
+    rows.append([_button(texts.MENU_RELATE, f"{CB_MENU}:relate")])
     rows.extend(_tree_link_row())
     return _kb(rows)
 
@@ -1580,6 +1583,9 @@ async def on_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if stranger is not None:
         return stranger
     choice = query.data.split(":", 1)[1]
+
+    if choice == "relate":
+        return await _start_relate(update, context)
 
     if choice == "view":
         # Their corner, not a bare link: what they are building is the thing
@@ -3173,6 +3179,120 @@ async def _start_name_fix(
     answers[flows.SUBJECT_KEY] = texts.tagged(target["label"], person_id)
     answers[flows.NAMES_KEY] = target["names"]
     return await _ask(update, context)
+
+
+async def _start_relate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """"Who is he to me?" — the question the tree exists to answer.
+
+    Nobody can work it out from a drawing once the drawing is bigger than a
+    page, and in a family where cousins marry cousins the answer is often
+    genuinely surprising.
+    """
+    context.user_data["relate"] = {}
+    await _say(
+        update,
+        texts.RELATE_FIRST,
+        _kb([
+            [_button(texts.RELATE_ME, f"{CB_RELATE}:me")],
+            [_button(texts.BACK_TO_MENU, CB_CANCEL)],
+        ]),
+    )
+    return RELATE
+
+
+async def _relate_pick(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, person_id: int
+):
+    """Take one of the two people, then either ask for the other or answer."""
+    picked = context.user_data.setdefault("relate", {})
+    if "a" not in picked:
+        picked["a"] = person_id
+        await _say(
+            update,
+            texts.RELATE_SECOND,
+            _kb([[_button(texts.BACK_TO_MENU, CB_CANCEL)]]),
+        )
+        return RELATE
+
+    context.user_data.pop("relate", None)
+    return await _answer_relate(update, context, picked["a"], person_id)
+
+
+async def _answer_relate(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, a: int, b: int
+):
+    found = await store.how_related(a, b)
+    if found is None:
+        return await _show_menu(update, context, texts.ERROR)
+
+    label_a = texts.tagged(found["a"]["label"], a)
+    label_b = texts.tagged(found["b"]["label"], b)
+    result = found["found"]
+
+    if result is None:
+        body = texts.relate_nothing(label_a, label_b)
+    elif result["kind"] == "distant":
+        body = texts.relate_distant(label_a, label_b, result["steps"])
+    elif result.get("already_owned"):
+        body = texts.relate_answer_owned(label_a, label_b, result["phrase"])
+    else:
+        # Suppress "they meet at" when one of them is the meeting point: a
+        # father is not somebody you meet your own father through.
+        through = found["through"]
+        if through and through["person_id"] in (a, b):
+            through = None
+        body = texts.relate_answer(
+            label_a,
+            label_b,
+            result["phrase"],
+            texts.tagged(through["label"], through["person_id"]) if through else None,
+        )
+
+    await _say(
+        update,
+        body,
+        _kb([
+            [_button(texts.RELATE_AGAIN, f"{CB_MENU}:relate")],
+            [_button(texts.BACK_TO_MENU, CB_CANCEL)],
+        ]),
+    )
+    return RELATE
+
+
+async def on_relate_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    parts = query.data.split(":")
+    if parts[1] == "me":
+        who = await store.contributor_state(update.effective_user.id)
+        if not who["person_id"]:
+            return await _show_menu(update, context, texts.ERROR)
+        return await _relate_pick(update, context, int(who["person_id"]))
+    return await _relate_pick(update, context, int(parts[2]))
+
+
+async def on_relate_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A name or a number, the same way the name-fix picker takes one."""
+    typed = (update.effective_message.text or "").strip()
+    number = typed.lstrip("#").strip()
+    if number.isdigit():
+        return await _relate_pick(update, context, int(number))
+
+    found = await store.search_people(typed)
+    if not found:
+        await _say(update, texts.name_fix_no_such_name(typed))
+        return RELATE
+    if len(found) == 1:
+        return await _relate_pick(update, context, found[0]["person_id"])
+
+    rows = [
+        [_button(_trim(texts.tagged(p["label"], p["person_id"])),
+                 f"{CB_RELATE}:pick:{p['person_id']}")]
+        for p in found
+    ]
+    rows.append([_button(texts.BACK_TO_MENU, CB_CANCEL)])
+    await _say(update, texts.name_fix_which_one(typed), _kb(rows))
+    return RELATE
 
 
 def _trim(label: str, limit: int = 60) -> str:

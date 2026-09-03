@@ -193,6 +193,55 @@ def parents_already_down(subject: str | None, parents: str) -> str:
     whose = "Your" if not subject else f"{subject}'s"
     return f"{whose} parents are already down: {parents}."
 
+# --- how are we related ----------------------------------------------------
+#
+# The question the tree exists to answer, and the one nobody can work out from
+# a drawing once it is bigger than a page.
+
+MENU_RELATE = "How are two people related?"
+
+RELATE_FIRST = (
+    "Who's the first person?\n\n"
+    "Type any part of their name, or their number from the tree. "
+    "Tap below if you mean yourself."
+)
+
+RELATE_ME = "Me"
+
+RELATE_SECOND = "And who's the second person?"
+
+RELATE_AGAIN = "Ask about two more"
+
+
+def relate_answer(a: str, b: str, phrase: str, through: str | None) -> str:
+    line = f"{b} is {a}'s {phrase}."
+    if through:
+        line += f"\n\nThey meet at {through}."
+    return line
+
+
+def relate_answer_owned(a: str, b: str, phrase: str) -> str:
+    """For a phrase that already says whose it is — "your wife's brother"."""
+    return f"{b} is {phrase}, counting from {a}."
+
+
+def relate_distant(a: str, b: str, steps: int) -> str:
+    return (
+        f"{a} and {b} are related through marriages rather than by blood — "
+        f"{steps} steps apart on the tree.\n\n"
+        "There's no single word for it, which is usually a sign the two lines "
+        "join further back than anyone has recorded yet."
+    )
+
+
+def relate_nothing(a: str, b: str) -> str:
+    return (
+        f"Nothing on the tree joins {a} and {b} yet.\n\n"
+        "Almost certainly they do join — the family is one family — but the "
+        "person who would show it hasn't been added."
+    )
+
+
 MENU_SWITCH = "Somebody else in the family"
 
 SWITCH_PICK = (
